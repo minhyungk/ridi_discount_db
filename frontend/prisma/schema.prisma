@@ -1,0 +1,34 @@
+// frontend/prisma/schema.prisma
+
+datasource db {
+  provider = "postgresql"
+  // url is gone from here!
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Book {
+  book_id       String         @id @map("book_id")
+  title         String
+  full_price    Int?           @map("full_price")    // 정가 (종이책/단권 합계)
+  set_price     Int?           @map("set_price")     // 수집된 세트 판매가
+  all_time_low  Int?           @map("all_time_low")  // 역대 최저가
+  updated_at    DateTime       @default(now()) @map("updated_at")
+  histories     PriceHistory[]
+
+  @@map("books")
+}
+
+model PriceHistory {
+  id            Int      @id @default(autoincrement())
+  book_id       String   @map("book_id")
+  current_price Int?     @map("current_price")
+  start_date    DateTime? @map("start_date")     // 할인 시작일
+  end_date      DateTime? @map("end_date")       // 할인 종료일
+  scraped_at    DateTime @default(now()) @map("scraped_at")
+  book          Book     @relation(fields: [book_id], references: [book_id])
+
+  @@map("price_history")
+}
