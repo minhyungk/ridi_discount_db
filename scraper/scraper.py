@@ -5,6 +5,7 @@ import time
 import psycopg2
 from datetime import datetime
 import os
+import traceback
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,13 +31,15 @@ class RidiScraper:
         return psycopg2.connect(**self.db_config)
 
     def init_db(self):
-        """Re-create tables with correct columns and types"""
+        """테이블 구조를 Next.js/Prisma와 동일하게 맞춤"""
         commands = (
             """
             CREATE TABLE IF NOT EXISTS books (
                 book_id VARCHAR(20) PRIMARY KEY,
                 title TEXT NOT NULL,
                 full_price INTEGER,
+                set_price INTEGER,
+                discount_pct INTEGER,
                 all_time_low INTEGER,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -45,7 +48,7 @@ class RidiScraper:
             CREATE TABLE IF NOT EXISTS price_history (
                 id SERIAL PRIMARY KEY,
                 book_id VARCHAR(20) REFERENCES books(book_id),
-                current_price INTEGER,
+                set_price INTEGER,
                 start_date TIMESTAMP,
                 end_date TIMESTAMP,
                 scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -59,15 +62,13 @@ class RidiScraper:
         conn.commit()
         cur.close()
         conn.close()
-        print("🗄️ Database synchronized.")
+        print("🗄️ Database synchronized with all columns.")
 
     def extract_detail(self, book_id):
-        """Robust parsing of bookDetail JSON"""
         try:
             url = f"{self.detail_base_url}{book_id}"
             response = requests.get(url, headers=self.headers, timeout=10)
             
-            # Target var bookDetail
             pattern = r'var bookDetail = (\{.*?\});'
             match = re.search(pattern, response.text, re.DOTALL)
             
@@ -75,59 +76,79 @@ class RidiScraper:
                 data = json.loads(match.group(1))
                 p_info = data.get('price_info', {})
                 
-                # Handling nested date objects or simple strings
+                # [수정] 리디 API는 'set_price'가 아니라 'current_price'를 씁니다.
+                set_price = p_info.get('current_price') or 0
+                discount_pct = p_info.get('ebook_discount_percentage') or 0
+                
+                # 역산 로직
+                if discount_pct > 0:
+                    calculated_full_price = int(set_price / (1 - (discount_pct / 100)))
+                else:
+                    calculated_full_price = p_info.get('paper_price') or p_info.get('regular_price') or set_price
+
                 def parse_date(date_obj):
                     if isinstance(date_obj, dict):
                         return date_obj.get('date')
                     return date_obj
 
-                # Mapping based on your provided JSON structure
                 return {
                     "start_date": parse_date(p_info.get('discount_start_date')),
                     "end_date": parse_date(p_info.get('discount_end_date')),
-                    "full_price": p_info.get('paper_price') or p_info.get('regular_price') or 0,
-                    "current_price": p_info.get('current_price') or 0
+                    "full_price": calculated_full_price,
+                    "set_price": set_price,
+                    "discount_pct": discount_pct
                 }
         except Exception as e:
-            print(f"⚠️ Extraction Error: {e}")
+            print(f"❌ Extraction Detail Error for {book_id}: {e}")
+            traceback.print_exc()
         return None
 
     def upsert_to_db(self, book_id, title, details):
         conn = self.get_db_connection()
         cur = conn.cursor()
         try:
-            # 1. UPSERT into books table
+            # 1. UPSERT into books table (all columns included)
             cur.execute("""
-                INSERT INTO books (book_id, title, full_price, set_price, all_time_low)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO books (book_id, title, full_price, set_price, all_time_low, discount_pct)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (book_id) DO UPDATE SET
                     title = EXCLUDED.title,
                     full_price = EXCLUDED.full_price,
-                    set_price = EXCLUDED.set_price,  -- current_price 대신 set_price
+                    set_price = EXCLUDED.set_price,
+                    discount_pct = EXCLUDED.discount_pct,
                     all_time_low = CASE 
                         WHEN books.all_time_low IS NULL OR books.all_time_low = 0 THEN EXCLUDED.set_price
                         ELSE LEAST(books.all_time_low, EXCLUDED.set_price)
                     END,
                     updated_at = CURRENT_TIMESTAMP;
-            """, (book_id, title, details['full_price'], details['current_price'], details['current_price']))
+            """, (
+                book_id, 
+                title, 
+                details.get('full_price', 0), 
+                details.get('set_price', 0),  
+                details.get('set_price', 0),     
+                details.get('discount_pct', 0)
+            ))
 
             # 2. INSERT into price_history table
             cur.execute("""
-                INSERT INTO price_history (book_id, current_price, start_date, end_date)
+                INSERT INTO price_history (book_id, set_price, start_date, end_date)
                 VALUES (%s, %s, %s, %s);
-            """, (book_id, details['current_price'], details['start_date'], details['end_date']))
+            """, (book_id, details.get('set_price', 0), details.get('start_date'), details.get('end_date')))
 
             conn.commit()
-            print(f"✅ Synced: {title[:20]}... | Price: {details['current_price']}")
+            display_title = (title[:25] + '..') if len(title) > 25 else title
+            print(f"✅ {display_title:<30} | Price: {details.get('set_price', 0):>7,}원 | Disc: {details.get('discount_pct', 0):>3}%")
         except Exception as e:
             conn.rollback()
-            print(f"❌ DB Error for {title}: {e}")
+            print(f"\n❌ DB Error for {title}")
+            traceback.print_exc()
         finally:
             cur.close()
             conn.close()
 
     def run(self):
-        self.init_db()
+        self.init_db() # 실행 시 테이블 구조 먼저 확인
         response = requests.get(self.list_api_url, headers=self.headers)
         items = response.json().get('data', {}).get('items', [])
 
@@ -140,7 +161,6 @@ class RidiScraper:
                 self.upsert_to_db(b_id, title, details)
             
             time.sleep(0.5)
-
 
 if __name__ == "__main__":
     scraper = RidiScraper(db_config)
