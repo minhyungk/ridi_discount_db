@@ -98,17 +98,18 @@ class RidiScraper:
         try:
             # 1. UPSERT into books table
             cur.execute("""
-                INSERT INTO books (book_id, title, full_price, all_time_low)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO books (book_id, title, full_price, set_price, all_time_low)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (book_id) DO UPDATE SET
                     title = EXCLUDED.title,
                     full_price = EXCLUDED.full_price,
+                    set_price = EXCLUDED.set_price,  -- current_price 대신 set_price
                     all_time_low = CASE 
-                        WHEN books.all_time_low IS NULL OR books.all_time_low = 0 THEN EXCLUDED.all_time_low
-                        ELSE LEAST(books.all_time_low, EXCLUDED.all_time_low)
+                        WHEN books.all_time_low IS NULL OR books.all_time_low = 0 THEN EXCLUDED.set_price
+                        ELSE LEAST(books.all_time_low, EXCLUDED.set_price)
                     END,
                     updated_at = CURRENT_TIMESTAMP;
-            """, (book_id, title, details['full_price'], details['current_price']))
+            """, (book_id, title, details['full_price'], details['current_price'], details['current_price']))
 
             # 2. INSERT into price_history table
             cur.execute("""

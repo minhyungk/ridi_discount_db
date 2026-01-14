@@ -22,3 +22,35 @@ Thumbs.db
 
 *.json
 !package.json # 단, Node.js 설정 파일은 제외하면 안 됩니다.
+
+ridi-db-data/
+/frontend/prisma/migrations/ # 로컬 개발용 마이그레이션 이력 (선택 사항)
+
+.env
+.env.local
+frontend/.env
+frontend/.env.local
+
+# --- Next.js (프론트엔드 빌드 결과물) ---
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# --- 패키지 매니저 및 라이브러리 ---
+# node_modules는 package.json만 있으면 언제든 다시 설치 가능합니다.
+node_modules/
+frontend/node_modules/
+
+# --- 파이썬 (스크래퍼) ---
+# 가상환경 폴더
+.venv/
+scraper/.venv/
+scraper/__pycache__/
+scraper/*.py[cod]
+
+# --- 기타 OS 및 에디터 설정 ---
+.DS_Store
+.vscode/
+.idea/
+
+frontend/src/generated/prisma
