@@ -1,6 +1,7 @@
 .env
 .env.local
 docker-compose.yml
+docs.md
 
 __pycache__/
 *.py[cod]
