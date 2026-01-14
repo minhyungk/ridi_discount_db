@@ -1,0 +1,23 @@
+.env
+.env.local
+docker-compose.yml
+
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+/ridi-db-data/
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+*.json
+!package.json # 단, Node.js 설정 파일은 제외하면 안 됩니다.
