@@ -54,3 +54,7 @@ scraper/*.py[cod]
 .idea/
 
 frontend/src/generated/prisma
+
+CLAUDE.md
+.CLAUDE
+.claude/
