@@ -21,7 +21,8 @@ dist/
 Thumbs.db
 
 *.json
-!package.json # 단, Node.js 설정 파일은 제외하면 안 됩니다.
+!package.json
+!*/package.json
 
 ridi-db-data/
 /frontend/prisma/migrations/ # 로컬 개발용 마이그레이션 이력 (선택 사항)
