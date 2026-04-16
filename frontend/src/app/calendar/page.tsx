@@ -2,9 +2,13 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
+export const runtime = "edge";
 
 const BLUE = "#1e9eff";
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+// 선두의 [특별 세트], [완결 세트], [기간한정 특별 세트] 등 모든 대괄호 태그 제거
+const stripTags = (t: string) => t.replace(/^(\[[^\]]*\]\s*)+/, "").trim();
 
 type BookEnd = {
   book_id: string;
@@ -202,39 +206,36 @@ export default async function CalendarPage({
                       }}
                     >
                       {books.slice(0, 4).map((b) => (
-                        <Link
-                          key={b.book_id}
-                          href={`/books/${b.book_id}`}
-                          title={`${b.title} 세일 종료`}
-                          style={{
-                            display: "block",
-                            maxWidth: "100%",
-                            padding: "3px 6px",
-                            fontSize: 11,
-                            background: "rgba(30,158,255,0.1)",
-                            color: BLUE,
-                            borderRadius: 4,
-                            fontWeight: 500,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            minWidth: 0,
-                          }}
-                        >
-                          {b.discount_pct ? `-${b.discount_pct}% ` : ""}
-                          {b.title}
-                        </Link>
+                        <BookPill key={b.book_id} book={b} />
                       ))}
                       {books.length > 4 && (
-                        <span
-                          style={{
-                            padding: "0 6px",
-                            fontSize: 11,
-                            color: "#6e6e73",
-                          }}
-                        >
-                          +{books.length - 4}건
-                        </span>
+                        <details style={{ minWidth: 0 }}>
+                          <summary
+                            style={{
+                              padding: "3px 6px",
+                              fontSize: 11,
+                              color: "#6e6e73",
+                              cursor: "pointer",
+                              listStyle: "none",
+                              fontWeight: 500,
+                            }}
+                          >
+                            +{books.length - 4}건 더 보기
+                          </summary>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 3,
+                              marginTop: 3,
+                              minWidth: 0,
+                            }}
+                          >
+                            {books.slice(4).map((b) => (
+                              <BookPill key={b.book_id} book={b} />
+                            ))}
+                          </div>
+                        </details>
                       )}
                     </div>
                   </>
@@ -245,6 +246,36 @@ export default async function CalendarPage({
         </div>
       </div>
     </main>
+  );
+}
+
+function BookPill({
+  book,
+}: {
+  book: { book_id: string; title: string; discount_pct: number | null };
+}) {
+  return (
+    <Link
+      href={`/books/${book.book_id}`}
+      title={`${book.title} 세일 종료`}
+      style={{
+        display: "block",
+        maxWidth: "100%",
+        padding: "3px 6px",
+        fontSize: 11,
+        background: "rgba(30,158,255,0.1)",
+        color: BLUE,
+        borderRadius: 4,
+        fontWeight: 500,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        minWidth: 0,
+      }}
+    >
+      {book.discount_pct ? `-${book.discount_pct}% ` : ""}
+      {stripTags(book.title)}
+    </Link>
   );
 }
 

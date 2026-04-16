@@ -51,6 +51,10 @@ table tbody tr a:hover {
   50% { opacity: 0.3; }
 }
 
+summary::-webkit-details-marker { display: none; }
+summary::marker { content: ""; }
+summary:hover { color: #1e9eff; }
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

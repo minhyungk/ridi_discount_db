@@ -5,6 +5,7 @@ import Link from "next/link";
 import PriceChart, { PricePoint } from "@/components/PriceChart";
 
 export const dynamic = "force-dynamic";
+export const runtime = "edge";
 
 const BLUE = "#1e9eff";
 
@@ -53,57 +54,77 @@ export default async function BookDetail({
         ← 목록으로
       </Link>
 
-      <header style={{ marginBottom: 32 }}>
-        <h1
+      <header
+        style={{
+          marginBottom: 32,
+          display: "flex",
+          gap: 20,
+          alignItems: "flex-start",
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={`https://img.ridicdn.net/cover/${book.book_id}/large?dpi=xhdpi`}
+          alt={book.title}
+          width={140}
+          height={200}
           style={{
-            fontSize: 28,
-            fontWeight: 700,
-            letterSpacing: "-0.4px",
-            color: "#1d1d1f",
-            lineHeight: 1.3,
+            width: 140,
+            height: "auto",
+            flexShrink: 0,
+            borderRadius: 6,
+            boxShadow: "0 1px 4px rgba(0,0,0,0.12)",
+            background: "#f5f5f7",
           }}
-        >
-          {book.title}
-        </h1>
-        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10 }}>
-          <a
-            href={`https://ridibooks.com/books/${book.book_id}`}
-            target="_blank"
-            rel="noopener noreferrer"
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1
             style={{
-              fontSize: 13,
-              color: BLUE,
-              fontWeight: 500,
+              fontSize: 26,
+              fontWeight: 700,
+              letterSpacing: "-0.4px",
+              color: "#1d1d1f",
+              lineHeight: 1.3,
             }}
           >
-            리디북스에서 보기 ↗
-          </a>
-          {isOnSale && (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "2px 10px",
-                fontSize: 12,
-                fontWeight: 600,
-                color: BLUE,
-                background: "rgba(30,158,255,0.1)",
-                borderRadius: 999,
-              }}
+            {book.title}
+          </h1>
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <a
+              href={`https://ridibooks.com/books/${book.book_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 13, color: BLUE, fontWeight: 500 }}
             >
+              리디북스에서 보기 ↗
+            </a>
+            {isOnSale && (
               <span
                 style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: BLUE,
-                  animation: "pulse 2s infinite",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "2px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: BLUE,
+                  background: "rgba(30,158,255,0.1)",
+                  borderRadius: 999,
                 }}
-              />
-              할인 중
-            </span>
-          )}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: BLUE,
+                    animation: "pulse 2s infinite",
+                  }}
+                />
+                할인 중
+              </span>
+            )}
+          </div>
         </div>
       </header>
 

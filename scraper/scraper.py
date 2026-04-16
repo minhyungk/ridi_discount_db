@@ -1,4 +1,5 @@
-import requests
+from curl_cffi import requests as http
+import requests as plain_requests  # list API only (JSON, no CF)
 import re
 import json
 import time
@@ -18,17 +19,20 @@ db_config = {
     'user': os.getenv('DB_USER'),
     'password': os.getenv('DB_PASSWORD'),
     'host': os.getenv('DB_HOST'),
-    'port': os.getenv('DB_PORT')
+    'port': os.getenv('DB_PORT'),
+    'sslmode': os.getenv('DB_SSLMODE', 'disable'),  # Neon: require, local docker: disable
 }
 
 class RidiScraper:
+    PAGE_SIZE = 200  # Ridibooks API 최대
+    DETAIL_SLEEP = 2.5  # 상세 페이지 요청 간격 (CF 레이트리밋 회피)
+
     def __init__(self, db_config):
-        self.list_api_url = "https://api.ridibooks.com/v2/selections/?section_id=748&limit=50"
+        self.list_api_base = "https://api.ridibooks.com/v2/selections/?section_id=748"
         self.detail_base_url = "https://ridibooks.com/books/"
-        self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
         self.db_config = db_config
+        # curl_cffi 세션 — Chrome TLS 지문 + 쿠키 유지 (__cf_bm 재사용)
+        self.session = http.Session(impersonate="chrome")
 
     def get_db_connection(self):
         return psycopg2.connect(**self.db_config)
@@ -57,23 +61,47 @@ class RidiScraper:
             )
         """)
 
-    def extract_detail(self, book_id):
-        try:
-            url = f"{self.detail_base_url}{book_id}"
-            response = requests.get(url, headers=self.headers, timeout=10)
-            html = response.text
+    def fetch_detail_html(self, book_id, max_retries=3):
+        """상세 페이지 HTML을 curl_cffi(chrome 지문) + 지수 백오프 재시도로 가져옴."""
+        url = f"{self.detail_base_url}{book_id}"
+        for attempt in range(max_retries):
+            try:
+                r = self.session.get(url, timeout=20)
+                if r.status_code == 200:
+                    return r.text
+                if r.status_code in (403, 429, 500, 502, 503, 504):
+                    wait = 2 ** attempt * 10  # 10s, 20s, 40s
+                    print(f"  [WARN] {book_id} HTTP {r.status_code}, retry in {wait}s")
+                    time.sleep(wait)
+                    continue
+                print(f"  [SKIP] {book_id} HTTP {r.status_code}")
+                return None
+            except Exception as e:
+                print(f"  [WARN] {book_id} request failed: {e}")
+                time.sleep(2 ** attempt * 5)
+        print(f"  [FAIL] {book_id} exhausted retries")
+        return None
 
-            p_info = {}
+    def extract_detail(self, book_id):
+        html = self.fetch_detail_html(book_id)
+        if html is None:
+            return None
+        try:
             m_detail = re.search(r'var bookDetail = (\{.*?\});', html, re.DOTALL)
-            if m_detail:
-                p_info = json.loads(m_detail.group(1)).get('price_info', {}) or {}
+            if not m_detail:
+                print(f"  [SKIP] {book_id} bookDetail JSON not found")
+                return None
+
+            p_info = json.loads(m_detail.group(1)).get('price_info', {}) or {}
 
             def parse_date(d):
                 return d.get('date') if isinstance(d, dict) else d
 
             set_price = int(p_info.get('current_price') or 0)
+            if set_price <= 0:
+                print(f"  [SKIP] {book_id} set_price=0 (not for sale / unavailable)")
+                return None
 
-            # 세트북의 실제 할인율은 price_info가 아닌 HTML 내 purchase 배열의 '세트 정가' discountRate
             m_rate = re.search(
                 r'"priceType":"전자책 세트 정가"[^}]*?"discountRate":(\d+)', html
             )
@@ -83,7 +111,7 @@ class RidiScraper:
 
             full_price = (
                 round(set_price / (1 - discount_pct / 100))
-                if discount_pct > 0 and set_price
+                if discount_pct > 0
                 else set_price
             )
 
@@ -95,9 +123,9 @@ class RidiScraper:
                 "discount_pct": discount_pct,
             }
         except Exception as e:
-            print(f"  [ERR] Detail extraction failed for {book_id}: {e}")
+            print(f"  [ERR] Detail parse failed for {book_id}: {e}")
             traceback.print_exc()
-        return None
+            return None
 
     def _upsert(self, cur, book_id, title, details):
         set_price = int(details.get('set_price', 0))
@@ -144,6 +172,24 @@ class RidiScraper:
         display_title = (title[:25] + '..') if len(title) > 25 else title
         print(f"  {display_title:<30} | {set_price:>7,d}원 | -{discount_pct:>2d}% | {status}")
 
+    def fetch_all_items(self):
+        """offset 페이지네이션으로 전체 세일 세트북 리스트 수집 (List API는 CF 밖)"""
+        items = []
+        offset = 0
+        while True:
+            url = f"{self.list_api_base}&limit={self.PAGE_SIZE}&offset={offset}"
+            r = plain_requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            batch = r.json().get('data', {}).get('items', [])
+            if not batch:
+                break
+            items.extend(batch)
+            print(f"  [list] offset={offset} fetched {len(batch)}")
+            if len(batch) < self.PAGE_SIZE:
+                break
+            offset += self.PAGE_SIZE
+            time.sleep(0.3)
+        return items
+
     def run(self):
         conn = self.get_db_connection()
         cur = conn.cursor()
@@ -151,19 +197,22 @@ class RidiScraper:
             self.init_db(cur)
             conn.commit()
 
-            response = requests.get(self.list_api_url, headers=self.headers)
-            items = response.json().get('data', {}).get('items', [])
-            print(f"[RidiDB] {len(items)} books found\n")
+            items = self.fetch_all_items()
+            print(f"\n[RidiDB] {len(items)} books found\n")
 
-            for item in items:
+            for i, item in enumerate(items, 1):
                 b_id = item['book']['book_id']
                 title = item['book']['title']
 
                 details = self.extract_detail(b_id)
                 if details:
+                    print(f"  [{i}/{len(items)}]", end=" ")
                     self._upsert(cur, b_id, title, details)
 
-                time.sleep(0.5)
+                if i % 50 == 0:
+                    conn.commit()
+
+                time.sleep(self.DETAIL_SLEEP)
 
             conn.commit()
             print(f"\n[RidiDB] Done — {len(items)} books processed")

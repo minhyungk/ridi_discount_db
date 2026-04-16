@@ -4,6 +4,7 @@ import { ko } from "date-fns/locale/ko";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
+export const runtime = "edge";
 
 const BLUE = "#1e9eff";
 
