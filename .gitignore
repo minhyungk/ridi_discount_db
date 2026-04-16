@@ -36,6 +36,7 @@ frontend/.env.local
 frontend/.next/
 frontend/out/
 frontend/build/
+frontend/tsconfig.tsbuildinfo
 
 # --- 패키지 매니저 및 라이브러리 ---
 # node_modules는 package.json만 있으면 언제든 다시 설치 가능합니다.
@@ -59,3 +60,4 @@ frontend/src/generated/prisma
 CLAUDE.md
 .CLAUDE
 .claude/
+DESIGN.md

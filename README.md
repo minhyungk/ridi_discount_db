@@ -66,7 +66,7 @@ pip install -r requirements.txt
 Run the scraper to populate the database:
 
 ```bash
-python main.py #needs edit
+python scraper.py
 ```
 
 ---

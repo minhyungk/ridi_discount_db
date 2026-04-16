@@ -2,11 +2,14 @@ import requests
 import re
 import json
 import time
+import sys
 import psycopg2
 from datetime import datetime
 import os
 import traceback
 from dotenv import load_dotenv
+
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 load_dotenv()
 
@@ -30,10 +33,9 @@ class RidiScraper:
     def get_db_connection(self):
         return psycopg2.connect(**self.db_config)
 
-    def init_db(self):
+    def init_db(self, cur):
         """테이블 구조를 Next.js/Prisma와 동일하게 맞춤"""
-        commands = (
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS books (
                 book_id VARCHAR(20) PRIMARY KEY,
                 title TEXT NOT NULL,
@@ -43,8 +45,8 @@ class RidiScraper:
                 all_time_low INTEGER,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """,
-            """
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS price_history (
                 id SERIAL PRIMARY KEY,
                 book_id VARCHAR(20) REFERENCES books(book_id),
@@ -53,114 +55,125 @@ class RidiScraper:
                 end_date TIMESTAMP,
                 scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """
-        )
-        conn = self.get_db_connection()
-        cur = conn.cursor()
-        for command in commands:
-            cur.execute(command)
-        conn.commit()
-        cur.close()
-        conn.close()
-        print("🗄️ Database synchronized with all columns.")
+        """)
 
     def extract_detail(self, book_id):
         try:
             url = f"{self.detail_base_url}{book_id}"
             response = requests.get(url, headers=self.headers, timeout=10)
-            
-            pattern = r'var bookDetail = (\{.*?\});'
-            match = re.search(pattern, response.text, re.DOTALL)
-            
-            if match:
-                data = json.loads(match.group(1))
-                p_info = data.get('price_info', {})
-                
-                # [수정] 리디 API는 'set_price'가 아니라 'current_price'를 씁니다.
-                set_price = p_info.get('current_price') or 0
-                discount_pct = p_info.get('ebook_discount_percentage') or 0
-                
-                # 역산 로직
-                if discount_pct > 0:
-                    calculated_full_price = int(set_price / (1 - (discount_pct / 100)))
-                else:
-                    calculated_full_price = p_info.get('paper_price') or p_info.get('regular_price') or set_price
+            html = response.text
 
-                def parse_date(date_obj):
-                    if isinstance(date_obj, dict):
-                        return date_obj.get('date')
-                    return date_obj
+            p_info = {}
+            m_detail = re.search(r'var bookDetail = (\{.*?\});', html, re.DOTALL)
+            if m_detail:
+                p_info = json.loads(m_detail.group(1)).get('price_info', {}) or {}
 
-                return {
-                    "start_date": parse_date(p_info.get('discount_start_date')),
-                    "end_date": parse_date(p_info.get('discount_end_date')),
-                    "full_price": calculated_full_price,
-                    "set_price": set_price,
-                    "discount_pct": discount_pct
-                }
+            def parse_date(d):
+                return d.get('date') if isinstance(d, dict) else d
+
+            set_price = int(p_info.get('current_price') or 0)
+
+            # 세트북의 실제 할인율은 price_info가 아닌 HTML 내 purchase 배열의 '세트 정가' discountRate
+            m_rate = re.search(
+                r'"priceType":"전자책 세트 정가"[^}]*?"discountRate":(\d+)', html
+            )
+            discount_pct = int(m_rate.group(1)) if m_rate else int(
+                p_info.get('ebook_discount_percentage') or 0
+            )
+
+            full_price = (
+                round(set_price / (1 - discount_pct / 100))
+                if discount_pct > 0 and set_price
+                else set_price
+            )
+
+            return {
+                "start_date": parse_date(p_info.get('discount_start_date')),
+                "end_date": parse_date(p_info.get('discount_end_date')),
+                "full_price": full_price,
+                "set_price": set_price,
+                "discount_pct": discount_pct,
+            }
         except Exception as e:
-            print(f"❌ Extraction Detail Error for {book_id}: {e}")
+            print(f"  [ERR] Detail extraction failed for {book_id}: {e}")
             traceback.print_exc()
         return None
 
-    def upsert_to_db(self, book_id, title, details):
+    def _upsert(self, cur, book_id, title, details):
+        set_price = int(details.get('set_price', 0))
+        discount_pct = int(details.get('discount_pct', 0))
+
+        # Upsert into books
+        cur.execute("""
+            INSERT INTO books (book_id, title, full_price, set_price, all_time_low, discount_pct)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (book_id) DO UPDATE SET
+                title = EXCLUDED.title,
+                full_price = EXCLUDED.full_price,
+                set_price = EXCLUDED.set_price,
+                discount_pct = EXCLUDED.discount_pct,
+                all_time_low = CASE
+                    WHEN books.all_time_low IS NULL OR books.all_time_low = 0 THEN EXCLUDED.set_price
+                    ELSE LEAST(books.all_time_low, EXCLUDED.set_price)
+                END,
+                updated_at = CURRENT_TIMESTAMP;
+        """, (
+            book_id, title,
+            details.get('full_price', 0),
+            set_price, set_price,
+            details.get('discount_pct', 0)
+        ))
+
+        # Only insert price_history if the price actually changed
+        cur.execute("""
+            SELECT set_price FROM price_history
+            WHERE book_id = %s
+            ORDER BY scraped_at DESC LIMIT 1
+        """, (book_id,))
+        last = cur.fetchone()
+
+        if not last or last[0] != set_price:
+            cur.execute("""
+                INSERT INTO price_history (book_id, set_price, start_date, end_date)
+                VALUES (%s, %s, %s, %s)
+            """, (book_id, set_price, details.get('start_date'), details.get('end_date')))
+            status = "NEW"
+        else:
+            status = "same"
+
+        display_title = (title[:25] + '..') if len(title) > 25 else title
+        print(f"  {display_title:<30} | {set_price:>7,d}원 | -{discount_pct:>2d}% | {status}")
+
+    def run(self):
         conn = self.get_db_connection()
         cur = conn.cursor()
         try:
-            # 1. UPSERT into books table (all columns included)
-            cur.execute("""
-                INSERT INTO books (book_id, title, full_price, set_price, all_time_low, discount_pct)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (book_id) DO UPDATE SET
-                    title = EXCLUDED.title,
-                    full_price = EXCLUDED.full_price,
-                    set_price = EXCLUDED.set_price,
-                    discount_pct = EXCLUDED.discount_pct,
-                    all_time_low = CASE 
-                        WHEN books.all_time_low IS NULL OR books.all_time_low = 0 THEN EXCLUDED.set_price
-                        ELSE LEAST(books.all_time_low, EXCLUDED.set_price)
-                    END,
-                    updated_at = CURRENT_TIMESTAMP;
-            """, (
-                book_id, 
-                title, 
-                details.get('full_price', 0), 
-                details.get('set_price', 0),  
-                details.get('set_price', 0),     
-                details.get('discount_pct', 0)
-            ))
+            self.init_db(cur)
+            conn.commit()
 
-            # 2. INSERT into price_history table
-            cur.execute("""
-                INSERT INTO price_history (book_id, set_price, start_date, end_date)
-                VALUES (%s, %s, %s, %s);
-            """, (book_id, details.get('set_price', 0), details.get('start_date'), details.get('end_date')))
+            response = requests.get(self.list_api_url, headers=self.headers)
+            items = response.json().get('data', {}).get('items', [])
+            print(f"[RidiDB] {len(items)} books found\n")
+
+            for item in items:
+                b_id = item['book']['book_id']
+                title = item['book']['title']
+
+                details = self.extract_detail(b_id)
+                if details:
+                    self._upsert(cur, b_id, title, details)
+
+                time.sleep(0.5)
 
             conn.commit()
-            display_title = (title[:25] + '..') if len(title) > 25 else title
-            print(f"✅ {display_title:<30} | Price: {details.get('set_price', 0):>7,}원 | Disc: {details.get('discount_pct', 0):>3}%")
+            print(f"\n[RidiDB] Done — {len(items)} books processed")
         except Exception as e:
             conn.rollback()
-            print(f"\n❌ DB Error for {title}")
+            print(f"\n[ERR] Scraper failed: {e}")
             traceback.print_exc()
         finally:
             cur.close()
             conn.close()
-
-    def run(self):
-        self.init_db() # 실행 시 테이블 구조 먼저 확인
-        response = requests.get(self.list_api_url, headers=self.headers)
-        items = response.json().get('data', {}).get('items', [])
-
-        for item in items:
-            b_id = item['book']['book_id']
-            title = item['book']['title']
-            
-            details = self.extract_detail(b_id)
-            if details:
-                self.upsert_to_db(b_id, title, details)
-            
-            time.sleep(0.5)
 
 if __name__ == "__main__":
     scraper = RidiScraper(db_config)
