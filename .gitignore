@@ -23,6 +23,8 @@ Thumbs.db
 *.json
 !package.json
 !*/package.json
+!tsconfig.json
+!**/tsconfig.json
 
 ridi-db-data/
 /frontend/prisma/migrations/ # 로컬 개발용 마이그레이션 이력 (선택 사항)
