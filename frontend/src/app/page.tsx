@@ -4,7 +4,6 @@ import { ko } from "date-fns/locale/ko";
 import Link from "next/link";
 import { unstable_cache } from "next/cache";
 
-export const runtime = "edge";
 export const revalidate = 3600;
 
 const BLUE = "#1e9eff";
