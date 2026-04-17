@@ -1,8 +1,7 @@
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 import { format, formatDistanceToNow, isAfter, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale/ko";
 import Link from "next/link";
-import { unstable_cache } from "next/cache";
 
 export const runtime = "edge";
 export const revalidate = 3600;
@@ -10,23 +9,21 @@ export const revalidate = 3600;
 const BLUE = "#1e9eff";
 const PAGE_SIZE = 50;
 
-const getBooks = unstable_cache(
-  async (query: string) =>
-    prisma.book.findMany({
-      where: query
-        ? { title: { contains: query, mode: "insensitive" } }
-        : undefined,
-      include: {
-        histories: { orderBy: { scraped_at: "desc" }, take: 1 },
-      },
-      orderBy: [
-        { list_order: { sort: "asc", nulls: "last" } },
-        { discount_pct: "desc" },
-      ],
-    }),
-  ["books-by-query"],
-  { revalidate: 3600, tags: ["books"] }
-);
+async function getBooks(query: string) {
+  const prisma = getPrisma();
+  return prisma.book.findMany({
+    where: query
+      ? { title: { contains: query, mode: "insensitive" } }
+      : undefined,
+    include: {
+      histories: { orderBy: { scraped_at: "desc" }, take: 1 },
+    },
+    orderBy: [
+      { list_order: { sort: "asc", nulls: "last" } },
+      { discount_pct: "desc" },
+    ],
+  });
+}
 
 type BookWithStatus = {
   book_id: string;

@@ -6,11 +6,13 @@ function createPrisma() {
   return new PrismaClient({ adapter });
 }
 
-// 로컬 개발: 싱글톤 (HMR에서 연결 누수 방지)
-// 프로덕션 edge: 매번 새 인스턴스 (stale 연결 방지)
-const globalForPrisma = global as unknown as { prisma: PrismaClient };
+// 로컬: 싱글톤 (HMR 누수 방지)
+// edge 프로덕션: 매 호출마다 새 인스턴스 (Neon WebSocket이 isolate 간 재사용 시 "Connection closed" 발생)
+const globalForPrisma = global as unknown as { prisma?: PrismaClient };
 
-export const prisma =
-  process.env.NODE_ENV === "production"
-    ? createPrisma()
-    : (globalForPrisma.prisma ??= createPrisma());
+export function getPrisma(): PrismaClient {
+  if (process.env.NODE_ENV === "production") {
+    return createPrisma();
+  }
+  return (globalForPrisma.prisma ??= createPrisma());
+}

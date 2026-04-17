@@ -1,24 +1,21 @@
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 import { format, isAfter, differenceInDays } from "date-fns";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import PriceChart, { PricePoint } from "@/components/PriceChart";
-import { unstable_cache } from "next/cache";
 
 export const runtime = "edge";
 export const revalidate = 3600;
 
 const BLUE = "#1e9eff";
 
-const getBookDetail = unstable_cache(
-  async (book_id: string) =>
-    prisma.book.findUnique({
-      where: { book_id },
-      include: { histories: { orderBy: { scraped_at: "asc" } } },
-    }),
-  ["book-detail"],
-  { revalidate: 3600, tags: ["books"] }
-);
+async function getBookDetail(book_id: string) {
+  const prisma = getPrisma();
+  return prisma.book.findUnique({
+    where: { book_id },
+    include: { histories: { orderBy: { scraped_at: "asc" } } },
+  });
+}
 
 export default async function BookDetail({
   params,

@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const runtime = "edge";
@@ -7,6 +7,7 @@ export const runtime = "edge";
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
+  const prisma = getPrisma();
   const books = await prisma.book.findMany({
     select: { book_id: true, updated_at: true },
     orderBy: { updated_at: "desc" },

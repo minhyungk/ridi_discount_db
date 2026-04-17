@@ -1,6 +1,5 @@
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 import Link from "next/link";
-import { unstable_cache } from "next/cache";
 
 export const runtime = "edge";
 export const revalidate = 3600;
@@ -17,20 +16,16 @@ type BookEnd = {
   discount_pct: number | null;
 };
 
-// 과거 달은 사실상 영구 캐시, 이번 달은 1시간 TTL로 scraper 반영
-const getMonthHistories = unstable_cache(
-  async (year: number, month: number) => {
-    const monthStart = new Date(year, month - 1, 1);
-    const monthEnd = new Date(year, month, 1);
-    return prisma.priceHistory.findMany({
-      where: { end_date: { gte: monthStart, lt: monthEnd } },
-      include: { book: true },
-      orderBy: { end_date: "asc" },
-    });
-  },
-  ["month-histories"],
-  { revalidate: 3600, tags: ["books"] }
-);
+async function getMonthHistories(year: number, month: number) {
+  const prisma = getPrisma();
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 1);
+  return prisma.priceHistory.findMany({
+    where: { end_date: { gte: monthStart, lt: monthEnd } },
+    include: { book: true },
+    orderBy: { end_date: "asc" },
+  });
+}
 
 export default async function CalendarPage({
   searchParams,
