@@ -47,7 +47,7 @@ export default async function BookDetail({
   const hasDiscount = !!(book.discount_pct && book.discount_pct > 0);
 
   return (
-    <main style={{ maxWidth: 960, margin: "0 auto", padding: "32px 24px 80px" }}>
+    <main className="detail-main" style={{ maxWidth: 960, margin: "0 auto", padding: "32px 24px 80px" }}>
       <Link
         href="/"
         style={{
@@ -63,6 +63,7 @@ export default async function BookDetail({
       </Link>
 
       <header
+        className="detail-header"
         style={{
           marginBottom: 32,
           display: "flex",
@@ -74,6 +75,7 @@ export default async function BookDetail({
         <img
           src={`https://img.ridicdn.net/cover/${book.book_id}/large?dpi=xhdpi`}
           alt={book.title}
+          className="detail-cover"
           width={140}
           height={200}
           style={{
@@ -87,6 +89,7 @@ export default async function BookDetail({
         />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1
+            className="detail-title"
             style={{
               fontSize: 26,
               fontWeight: 700,
@@ -154,12 +157,8 @@ export default async function BookDetail({
       </header>
 
       <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-          gap: 12,
-          marginBottom: 32,
-        }}
+        className="stat-grid"
+        style={{ marginBottom: 32 }}
       >
         <StatCard
           label="현재 가격"
@@ -184,6 +183,7 @@ export default async function BookDetail({
           <StatCard
             label="할인 기간"
             value={`${format(new Date(latest.start_date), "M.d")} — ${format(new Date(latest.end_date), "M.d")}`}
+            span={2}
           />
         )}
       </section>
@@ -222,11 +222,13 @@ function StatCard({
   value,
   accent,
   strike,
+  span,
 }: {
   label: string;
   value: string;
   accent?: boolean;
   strike?: boolean;
+  span?: number;
 }) {
   return (
     <div
@@ -234,6 +236,7 @@ function StatCard({
         padding: "14px 16px",
         background: "#f5f5f7",
         borderRadius: 10,
+        gridColumn: span ? `span ${span}` : undefined,
       }}
     >
       <div style={{ fontSize: 11, color: "#6e6e73", fontWeight: 500 }}>{label}</div>

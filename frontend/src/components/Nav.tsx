@@ -48,16 +48,7 @@ export default function Nav() {
         borderBottom: "1px solid rgba(0,0,0,0.06)",
       }}
     >
-      <div
-        style={{
-          maxWidth: 1120,
-          margin: "0 auto",
-          padding: "12px 24px",
-          display: "flex",
-          alignItems: "center",
-          gap: 20,
-        }}
-      >
+      <div className="nav-inner">
         <Link
           href="/"
           style={{
@@ -71,7 +62,16 @@ export default function Nav() {
           RidiDB
         </Link>
 
-        <form onSubmit={onSubmit} style={{ flex: 1, maxWidth: 520 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link href="/" style={linkStyle(isHome)}>
+            할인 도서
+          </Link>
+          <Link href="/calendar" style={linkStyle(isCalendar)}>
+            캘린더
+          </Link>
+        </div>
+
+        <form onSubmit={onSubmit} className="nav-search">
           <div
             style={{
               position: "relative",
@@ -115,15 +115,6 @@ export default function Nav() {
             />
           </div>
         </form>
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/" style={linkStyle(isHome)}>
-            할인 도서
-          </Link>
-          <Link href="/calendar" style={linkStyle(isCalendar)}>
-            캘린더
-          </Link>
-        </div>
       </div>
     </nav>
   );

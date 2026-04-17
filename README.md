@@ -7,11 +7,11 @@ Three components:
 - **Database** — PostgreSQL (Docker locally, Neon serverless in production)
 - **Frontend** (Next.js App Router) — SSR dashboard, book detail w/ price chart, sale-end calendar
 
-Production stack is fully free-tier: **Neon** (Postgres) + **Cloudflare Pages** (frontend) + **GitHub Actions** (scheduled scraper).
+Production stack: **Neon** (Postgres) + **Cloudflare Pages** (frontend) + **GitHub Actions** (scheduled scraper).
 
 ---
 
-## 🚀 Local Development
+## Local Development
 
 ### 1. Prerequisites
 - **Docker & Docker Compose** — for local Postgres
@@ -65,7 +65,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## ☁️ Production Deployment
+## Production Deployment
 
 ### Database — Neon
 1. We use [neon.tech](https://neon.tech)
@@ -100,7 +100,7 @@ Manual run: **Actions → Daily scraper → Run workflow**.
 
 ---
 
-## 🗄️ Architecture
+## Architecture
 
 ### Data Flow
 1. Scraper hits `api.ridibooks.com/v2/selections/?section_id=748` (set books on sale) with pagination, then fetches each book's detail page via `curl_cffi`.
@@ -117,7 +117,7 @@ Manual run: **Actions → Daily scraper → Run workflow**.
 
 ---
 
-## 🧰 Tech Stack
+## Tech Stack
 
 - **Frontend:** Next.js 15 (App Router, RSC, edge runtime), recharts, Prisma 6
 - **Scraper:** Python 3.11, `curl_cffi` (Chrome TLS fingerprint), `psycopg2`

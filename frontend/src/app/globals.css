@@ -66,3 +66,105 @@ summary:hover { color: #1e9eff; }
   background: rgba(0, 0, 0, 0.18);
   border-radius: 4px;
 }
+
+/* ── Nav 반응형 ── */
+.nav-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.nav-search {
+  flex: 1;
+  max-width: 520px;
+  order: 0;
+}
+@media (max-width: 768px) {
+  .nav-inner {
+    gap: 10px;
+    padding: 10px 16px;
+  }
+  .nav-search {
+    order: 3;
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+}
+
+/* ── 홈 PC 테이블 / 모바일 카드 전환 ── */
+.book-table {
+  display: block;
+}
+.book-cards {
+  display: none;
+}
+@media (max-width: 768px) {
+  .book-table {
+    display: none;
+  }
+  .book-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .home-header h1 {
+    font-size: 24px !important;
+  }
+  .home-main {
+    padding: 24px 16px 60px !important;
+  }
+}
+
+/* ── 캘린더 모바일 ── */
+@media (max-width: 768px) {
+  .cal-cell {
+    min-height: 80px !important;
+    padding: 4px !important;
+  }
+  .cal-pill {
+    font-size: 8px !important;
+    padding: 1px 3px !important;
+  }
+  .cal-weekday {
+    font-size: 10px !important;
+    padding: 6px 4px !important;
+  }
+  .cal-header h1 {
+    font-size: 22px !important;
+  }
+  .cal-main {
+    padding: 24px 8px 60px !important;
+  }
+}
+
+/* ── 상세 페이지 StatCard 그리드 ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+@media (max-width: 768px) {
+  .stat-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .stat-grid > *:nth-child(n+4) {
+    grid-column: span 1;
+  }
+  .detail-main {
+    padding: 24px 16px 60px !important;
+  }
+  .detail-header {
+    gap: 14px !important;
+  }
+  .detail-cover {
+    width: 100px !important;
+    height: auto !important;
+  }
+  .detail-title {
+    font-size: 20px !important;
+  }
+}

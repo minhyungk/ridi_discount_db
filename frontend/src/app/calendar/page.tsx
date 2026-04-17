@@ -51,7 +51,7 @@ export default async function CalendarPage({
   const byDay = new Map<number, BookEnd[]>();
   for (const h of histories) {
     if (!h.end_date) continue;
-    const key = `${h.book_id}-${h.end_date.toISOString()}`;
+    const key = `${h.book_id}-${new Date(h.end_date).toISOString()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const day = new Date(h.end_date).getDate();
@@ -77,8 +77,9 @@ export default async function CalendarPage({
   const today = now.getFullYear() === year && now.getMonth() + 1 === month ? now.getDate() : null;
 
   return (
-    <main style={{ maxWidth: 1120, margin: "0 auto", padding: "40px 24px 80px" }}>
+    <main className="cal-main" style={{ maxWidth: 1120, margin: "0 auto", padding: "40px 24px 80px" }}>
       <header
+        className="cal-header"
         style={{
           marginBottom: 28,
           display: "flex",
@@ -140,6 +141,7 @@ export default async function CalendarPage({
           {WEEKDAYS.map((d, i) => (
             <div
               key={d}
+              className="cal-weekday"
               style={{
                 padding: "10px 12px",
                 fontSize: 12,
@@ -166,6 +168,7 @@ export default async function CalendarPage({
             return (
               <div
                 key={idx}
+                className="cal-cell"
                 style={{
                   minWidth: 0,
                   minHeight: 120,
@@ -230,7 +233,7 @@ export default async function CalendarPage({
                               fontWeight: 500,
                             }}
                           >
-                            +{books.length - 4}건 더 보기
+                            +{books.length - 4}건
                           </summary>
                           <div
                             style={{
@@ -268,11 +271,12 @@ function BookPill({
     <Link
       href={`/books/${book.book_id}`}
       title={`${book.title} 세일 종료`}
+      className="cal-pill"
       style={{
         display: "block",
         maxWidth: "100%",
         padding: "3px 6px",
-        fontSize: 11,
+        fontSize: 10,
         background: "rgba(30,158,255,0.1)",
         color: BLUE,
         borderRadius: 4,
@@ -283,7 +287,6 @@ function BookPill({
         minWidth: 0,
       }}
     >
-      {book.discount_pct ? `-${book.discount_pct}% ` : ""}
       {stripTags(book.title)}
     </Link>
   );
