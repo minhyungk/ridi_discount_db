@@ -232,11 +232,11 @@ function StatCard({
 }) {
   return (
     <div
+      className={span ? "stat-span-2" : undefined}
       style={{
         padding: "14px 16px",
         background: "#f5f5f7",
         borderRadius: 10,
-        gridColumn: span ? `span ${span}` : undefined,
       }}
     >
       <div style={{ fontSize: 11, color: "#6e6e73", fontWeight: 500 }}>{label}</div>

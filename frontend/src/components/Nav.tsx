@@ -39,8 +39,10 @@ export default function Nav() {
   return (
     <nav
       style={{
-        position: "sticky",
+        position: "fixed",
         top: 0,
+        left: 0,
+        right: 0,
         zIndex: 50,
         background: "rgba(255,255,255,0.85)",
         backdropFilter: "saturate(180%) blur(20px)",
@@ -115,6 +117,24 @@ export default function Nav() {
             />
           </div>
         </form>
+
+        <a
+          href="https://github.com/minhyungk"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="nav-contact"
+          style={{
+            padding: "8px 12px",
+            borderRadius: 999,
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#6e6e73",
+            background: "rgba(0,0,0,0.04)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          문의
+        </a>
       </div>
     </nav>
   );
