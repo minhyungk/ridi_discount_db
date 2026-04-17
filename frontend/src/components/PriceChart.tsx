@@ -15,9 +15,21 @@ import {
 const BLUE = "#1e9eff";
 
 export type PricePoint = {
-  date: string;
+  ts: number; // timestamp (ms)
   price: number;
 };
+
+const DAY_MS = 86_400_000;
+
+function fmtShort(ts: number) {
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}.${d.getDate()}`;
+}
+
+function fmtLong(ts: number) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
+}
 
 export default function PriceChart({
   data,
@@ -60,10 +72,17 @@ export default function PriceChart({
         <LineChart data={data} margin={{ top: 16, right: 24, bottom: 8, left: 8 }}>
           <CartesianGrid stroke="rgba(0,0,0,0.06)" vertical={false} />
           <XAxis
-            dataKey="date"
+            dataKey="ts"
+            type="number"
+            scale="time"
+            domain={[
+              (dataMin: number) => dataMin - DAY_MS,
+              (dataMax: number) => dataMax + DAY_MS,
+            ]}
             tick={{ fontSize: 11, fill: "#6e6e73" }}
             tickLine={false}
             axisLine={{ stroke: "rgba(0,0,0,0.1)" }}
+            tickFormatter={fmtShort}
           />
           <YAxis
             domain={[0, maxPrice + topPadding]}
@@ -87,6 +106,7 @@ export default function PriceChart({
               fontSize: 12,
             }}
             formatter={(v: number) => [`${v.toLocaleString()}원`, "가격"]}
+            labelFormatter={(ts: number) => fmtLong(ts)}
             labelStyle={{ color: "#1d1d1f", fontWeight: 600 }}
           />
           {fullPrice != null && (

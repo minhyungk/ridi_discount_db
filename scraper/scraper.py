@@ -14,6 +14,14 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 load_dotenv()
 
+def _date_key(d):
+    """date/datetime/str/None → 'YYYY-MM-DD' or None. DB와 API 사이 타입 차이 흡수."""
+    if d is None:
+        return None
+    if hasattr(d, 'strftime'):
+        return d.strftime("%Y-%m-%d")
+    return str(d)[:10]
+
 db_config = {
     'dbname': os.getenv('DB_NAME'),
     'user': os.getenv('DB_USER'),
@@ -157,19 +165,28 @@ class RidiScraper:
             list_order
         ))
 
-        # Only insert price_history if the price actually changed
+        # 가격 or 세일 시작일이 바뀌었을 때만 새 row 삽입.
+        # 같은 가격이라도 start_date가 다르면 재세일 이벤트이므로 별개 row로 보존.
         cur.execute("""
-            SELECT set_price FROM price_history
+            SELECT set_price, start_date FROM price_history
             WHERE book_id = %s
             ORDER BY scraped_at DESC LIMIT 1
         """, (book_id,))
         last = cur.fetchone()
 
-        if not last or last[0] != set_price:
+        new_start = details.get('start_date')
+        new_end = details.get('end_date')
+        changed = (
+            not last
+            or last[0] != set_price
+            or _date_key(last[1]) != _date_key(new_start)
+        )
+
+        if changed:
             cur.execute("""
                 INSERT INTO price_history (book_id, set_price, start_date, end_date)
                 VALUES (%s, %s, %s, %s)
-            """, (book_id, set_price, details.get('start_date'), details.get('end_date')))
+            """, (book_id, set_price, new_start, new_end))
             status = "NEW"
         else:
             status = "same"

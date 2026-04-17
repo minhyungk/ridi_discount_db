@@ -34,6 +34,7 @@ type BookWithStatus = {
   all_time_low: number | null;
   isOnSale: boolean;
   isEndingSoon: boolean;
+  isNew: boolean;
   lastHistory?: { start_date: Date | null; end_date: Date | null };
 };
 
@@ -52,9 +53,11 @@ export default async function HomePage({
   const withStatus = books.map((book) => {
     const h = book.histories[0];
     const endDate = h?.end_date ? new Date(h.end_date) : null;
+    const startDate = h?.start_date ? new Date(h.start_date) : null;
     const isOnSale = !!(endDate && isAfter(endDate, now));
     const isEndingSoon = isOnSale && endDate ? differenceInDays(endDate, now) <= 7 : false;
-    return { ...book, lastHistory: h, isOnSale, isEndingSoon };
+    const isNew = isOnSale && startDate ? differenceInDays(now, startDate) < 3 : false;
+    return { ...book, lastHistory: h, isOnSale, isEndingSoon, isNew };
   });
 
   const filtered = query ? withStatus : withStatus.filter((b) => b.isOnSale);
@@ -239,6 +242,11 @@ function BookCard({ book }: { book: BookWithStatus }) {
               할인 중
             </span>
           )}
+          {book.isNew && (
+            <span style={{ padding: "1px 8px", fontSize: 11, fontWeight: 600, color: "#ca8a04", background: "rgba(202,138,4,0.12)", borderRadius: 999 }}>
+              NEW!
+            </span>
+          )}
           {book.isEndingSoon && (
             <span style={{ padding: "1px 8px", fontSize: 11, fontWeight: 600, color: "#e0483e", background: "rgba(224,72,62,0.1)", borderRadius: 999 }}>
               종료 임박
@@ -341,6 +349,11 @@ function BookRow({ book }: { book: BookWithStatus }) {
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: BLUE, animation: "pulse 2s infinite" }} />
               할인 중
             </span>
+            {book.isNew && (
+              <span style={{ display: "inline-block", padding: "2px 8px", fontSize: 11, fontWeight: 600, color: "#ca8a04", background: "rgba(202,138,4,0.12)", borderRadius: 999 }}>
+                NEW!
+              </span>
+            )}
             {book.isEndingSoon && (
               <span style={{ display: "inline-block", padding: "2px 8px", fontSize: 11, fontWeight: 600, color: "#e0483e", background: "rgba(224,72,62,0.1)", borderRadius: 999 }}>
                 종료 임박

@@ -31,17 +31,38 @@ export default async function BookDetail({
   const now = new Date();
   const latest = book.histories[book.histories.length - 1];
   const endDate = latest?.end_date ? new Date(latest.end_date) : null;
+  const startDate = latest?.start_date ? new Date(latest.start_date) : null;
   const isOnSale = !!(endDate && isAfter(endDate, now));
   const isEndingSoon = isOnSale && endDate ? differenceInDays(endDate, now) <= 7 : false;
+  const isNew = isOnSale && startDate ? differenceInDays(now, startDate) < 3 : false;
 
   const chartData: PricePoint[] = book.histories
     .filter((h) => h.set_price != null)
     .map((h) => ({
-      date: format(new Date(h.scraped_at), "M.d"),
+      ts: new Date(h.scraped_at).getTime(),
       price: h.set_price as number,
     }));
 
-  const hasDiscount = !!(book.discount_pct && book.discount_pct > 0);
+  // 세일 중: 마지막 가격이 오늘까지 유지됐음을 수평선으로 시각화
+  // 세일 종료: end_date 지점에서 정가로 수직 상승 (같은 ts의 두 포인트 = stepAfter 수직선)
+  if (chartData.length > 0) {
+    const last = chartData[chartData.length - 1];
+    if (isOnSale) {
+      const nowTs = now.getTime();
+      if (last.ts < nowTs) {
+        chartData.push({ ts: nowTs, price: last.price });
+      }
+    } else if (endDate && book.full_price && isAfter(now, endDate)) {
+      const endTs = endDate.getTime();
+      if (last.ts < endTs) {
+        chartData.push({ ts: endTs, price: last.price });
+      }
+      chartData.push({ ts: endTs, price: book.full_price });
+    }
+  }
+
+  // "현재 할인 중" (세일 종료 후에는 false)
+  const hasDiscount = !!(book.discount_pct && book.discount_pct > 0 && isOnSale);
 
   return (
     <main className="detail-main" style={{ maxWidth: 960, margin: "0 auto", padding: "32px 24px 80px" }}>
@@ -132,6 +153,21 @@ export default async function BookDetail({
                   />
                   할인 중
                 </span>
+                {isNew && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "2px 8px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "#ca8a04",
+                      background: "rgba(202,138,4,0.12)",
+                      borderRadius: 999,
+                    }}
+                  >
+                    NEW!
+                  </span>
+                )}
                 {isEndingSoon && (
                   <span
                     style={{
@@ -159,13 +195,13 @@ export default async function BookDetail({
       >
         <StatCard
           label="현재 가격"
-          value={`${book.set_price?.toLocaleString() ?? "—"}원`}
-          accent
+          value={`${(isOnSale ? book.set_price : book.full_price)?.toLocaleString() ?? "—"}원`}
+          accent={isOnSale}
         />
         <StatCard
           label="정가"
           value={`${book.full_price?.toLocaleString() ?? "—"}원`}
-          strike
+          strike={isOnSale}
         />
         <StatCard
           label="할인율"
@@ -178,7 +214,7 @@ export default async function BookDetail({
         />
         {latest?.start_date && latest?.end_date && (
           <StatCard
-            label="할인 기간"
+            label={isOnSale ? "할인 기간" : "최근 세일"}
             value={`${format(new Date(latest.start_date), "M.d")} — ${format(new Date(latest.end_date), "M.d")}`}
             span={2}
           />
