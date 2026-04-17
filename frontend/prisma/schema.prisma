@@ -16,6 +16,7 @@ model Book {
   set_price     Int?           @map("set_price")
   all_time_low  Int?           @map("all_time_low")
   discount_pct  Int?           @map("discount_pct")
+  list_order    Int?           @map("list_order")
   updated_at    DateTime       @default(now()) @map("updated_at")
   histories     PriceHistory[]
 

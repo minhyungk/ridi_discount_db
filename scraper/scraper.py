@@ -47,9 +47,12 @@ class RidiScraper:
                 set_price INTEGER,
                 discount_pct INTEGER,
                 all_time_low INTEGER,
+                list_order INTEGER,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # 기존 테이블용 마이그레이션 (신규 컬럼 추가)
+        cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS list_order INTEGER")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS price_history (
                 id SERIAL PRIMARY KEY,
@@ -127,19 +130,20 @@ class RidiScraper:
             traceback.print_exc()
             return None
 
-    def _upsert(self, cur, book_id, title, details):
+    def _upsert(self, cur, book_id, title, details, list_order):
         set_price = int(details.get('set_price', 0))
         discount_pct = int(details.get('discount_pct', 0))
 
         # Upsert into books
         cur.execute("""
-            INSERT INTO books (book_id, title, full_price, set_price, all_time_low, discount_pct)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO books (book_id, title, full_price, set_price, all_time_low, discount_pct, list_order)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (book_id) DO UPDATE SET
                 title = EXCLUDED.title,
                 full_price = EXCLUDED.full_price,
                 set_price = EXCLUDED.set_price,
                 discount_pct = EXCLUDED.discount_pct,
+                list_order = EXCLUDED.list_order,
                 all_time_low = CASE
                     WHEN books.all_time_low IS NULL OR books.all_time_low = 0 THEN EXCLUDED.set_price
                     ELSE LEAST(books.all_time_low, EXCLUDED.set_price)
@@ -149,7 +153,8 @@ class RidiScraper:
             book_id, title,
             details.get('full_price', 0),
             set_price, set_price,
-            details.get('discount_pct', 0)
+            details.get('discount_pct', 0),
+            list_order
         ))
 
         # Only insert price_history if the price actually changed
@@ -197,6 +202,12 @@ class RidiScraper:
             self.init_db(cur)
             conn.commit()
 
+            # 매 런 시작 시 list_order 초기화 —
+            # 이번 세일 리스트에 없는 책(세일 종료된 옛 책)은 NULL로 남아서
+            # 검색 시 인기순 뒤쪽에 나오지만 히스토리 조회는 정상 작동
+            cur.execute("UPDATE books SET list_order = NULL")
+            conn.commit()
+
             items = self.fetch_all_items()
             print(f"\n[RidiDB] {len(items)} books found\n")
 
@@ -207,7 +218,7 @@ class RidiScraper:
                 details = self.extract_detail(b_id)
                 if details:
                     print(f"  [{i}/{len(items)}]", end=" ")
-                    self._upsert(cur, b_id, title, details)
+                    self._upsert(cur, b_id, title, details, i - 1)
 
                 if i % 50 == 0:
                     conn.commit()

@@ -1,13 +1,24 @@
 import { prisma } from "@/lib/prisma";
-import { format, isAfter } from "date-fns";
+import { format, isAfter, differenceInDays } from "date-fns";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import PriceChart, { PricePoint } from "@/components/PriceChart";
+import { unstable_cache } from "next/cache";
 
-export const dynamic = "force-dynamic";
 export const runtime = "edge";
+export const revalidate = 3600;
 
 const BLUE = "#1e9eff";
+
+const getBookDetail = unstable_cache(
+  async (book_id: string) =>
+    prisma.book.findUnique({
+      where: { book_id },
+      include: { histories: { orderBy: { scraped_at: "asc" } } },
+    }),
+  ["book-detail"],
+  { revalidate: 3600, tags: ["books"] }
+);
 
 export default async function BookDetail({
   params,
@@ -16,18 +27,15 @@ export default async function BookDetail({
 }) {
   const { book_id } = await params;
 
-  const book = await prisma.book.findUnique({
-    where: { book_id },
-    include: {
-      histories: { orderBy: { scraped_at: "asc" } },
-    },
-  });
+  const book = await getBookDetail(book_id);
 
   if (!book) notFound();
 
   const now = new Date();
   const latest = book.histories[book.histories.length - 1];
-  const isOnSale = !!(latest?.end_date && isAfter(new Date(latest.end_date), now));
+  const endDate = latest?.end_date ? new Date(latest.end_date) : null;
+  const isOnSale = !!(endDate && isAfter(endDate, now));
+  const isEndingSoon = isOnSale && endDate ? differenceInDays(endDate, now) <= 7 : false;
 
   const chartData: PricePoint[] = book.histories
     .filter((h) => h.set_price != null)
@@ -99,30 +107,47 @@ export default async function BookDetail({
               리디북스에서 보기 ↗
             </a>
             {isOnSale && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "2px 10px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: BLUE,
-                  background: "rgba(30,158,255,0.1)",
-                  borderRadius: 999,
-                }}
-              >
+              <>
                 <span
                   style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    background: BLUE,
-                    animation: "pulse 2s infinite",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "2px 10px",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: BLUE,
+                    background: "rgba(30,158,255,0.1)",
+                    borderRadius: 999,
                   }}
-                />
-                할인 중
-              </span>
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: BLUE,
+                      animation: "pulse 2s infinite",
+                    }}
+                  />
+                  할인 중
+                </span>
+                {isEndingSoon && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "2px 8px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "#e0483e",
+                      background: "rgba(224,72,62,0.1)",
+                      borderRadius: 999,
+                    }}
+                  >
+                    종료 임박
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>

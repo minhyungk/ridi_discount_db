@@ -43,9 +43,8 @@ export default function PriceChart({
   }
 
   const prices = data.map((d) => d.price);
-  const minPrice = Math.min(...prices, allTimeLow ?? Infinity);
   const maxPrice = Math.max(...prices, fullPrice ?? 0);
-  const padding = Math.max(Math.round((maxPrice - minPrice) * 0.1), 500);
+  const topPadding = Math.max(Math.round(maxPrice * 0.05), 500);
 
   return (
     <div style={{ width: "100%", height: 360 }}>
@@ -59,7 +58,9 @@ export default function PriceChart({
             axisLine={{ stroke: "rgba(0,0,0,0.1)" }}
           />
           <YAxis
-            domain={[Math.max(0, minPrice - padding), maxPrice + padding]}
+            domain={[0, maxPrice + topPadding]}
+            type="number"
+            allowDataOverflow={true}
             tick={{ fontSize: 11, fill: "#6e6e73" }}
             tickLine={false}
             axisLine={false}
