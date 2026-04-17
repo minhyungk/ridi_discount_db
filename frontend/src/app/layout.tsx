@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Suspense } from "react";
 import Nav from "@/components/Nav";
 import "./globals.css";
 
+const GA_ID = "G-L3H4DFXHNK";
+
 export const metadata: Metadata = {
   title: "RidiDB — 리디북스 할인 트래커",
   description: "리디북스 세트도서 가격 변동을 한눈에 추적하세요",
+  verification: {
+    google: "-ggs2IJPA-BBSLoyIB5hDiCaWwu0Vvydv-jK6JMfMcM",
+  },
 };
 
 export default function RootLayout({
@@ -15,6 +21,20 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
+      <head>
+        <Script
+          src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
+          strategy="afterInteractive"
+        />
+        <Script id="gtag-init" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', '${GA_ID}');
+          `}
+        </Script>
+      </head>
       <body className="antialiased">
         <Suspense fallback={null}>
           <Nav />
