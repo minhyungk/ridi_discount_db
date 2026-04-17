@@ -43,7 +43,6 @@ export default async function CalendarPage({
   const month = m ? parseInt(m, 10) : now.getMonth() + 1;
 
   const monthStart = new Date(year, month - 1, 1);
-  const monthEnd = new Date(year, month, 1);
 
   const histories = await getMonthHistories(year, month);
 
