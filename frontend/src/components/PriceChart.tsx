@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -27,6 +28,9 @@ export default function PriceChart({
   fullPrice: number | null;
   allTimeLow: number | null;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   if (data.length === 0) {
     return (
       <div
@@ -40,6 +44,10 @@ export default function PriceChart({
         가격 히스토리가 없습니다.
       </div>
     );
+  }
+
+  if (!mounted) {
+    return <div style={{ width: "100%", height: 360 }} aria-hidden />;
   }
 
   const prices = data.map((d) => d.price);
