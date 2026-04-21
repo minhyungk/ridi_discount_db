@@ -10,17 +10,62 @@ generator client {
 }
 
 model Book {
-  book_id       String         @id @map("book_id")
-  title         String
-  full_price    Int?           @map("full_price")
-  set_price     Int?           @map("set_price")
-  all_time_low  Int?           @map("all_time_low")
-  discount_pct  Int?           @map("discount_pct")
-  list_order    Int?           @map("list_order")
-  updated_at    DateTime       @default(now()) @map("updated_at")
-  histories     PriceHistory[]
+  book_id          String         @id @map("book_id")
+  title            String
+  full_price       Int?           @map("full_price")
+  set_price        Int?           @map("set_price")
+  all_time_low     Int?           @map("all_time_low")
+  discount_pct     Int?           @map("discount_pct")
+  list_order       Int?           @map("list_order")
+  comic            Boolean?       @map("comic")
+  publisher        String?        @map("publisher")
+  publication_date DateTime?      @map("publication_date") @db.Date
+  set_total        Int?           @map("set_total")
+  updated_at       DateTime       @default(now()) @map("updated_at")
+  histories        PriceHistory[]
+  categories       BookCategory[]
+  authors          BookAuthor[]
 
   @@map("books")
+}
+
+model Category {
+  category_id Int            @id @map("category_id")
+  name        String
+  genre       String?
+  parent_id   Int?           @map("parent_id")
+  books       BookCategory[]
+
+  @@map("categories")
+}
+
+model BookCategory {
+  book_id     String
+  category_id Int
+  book        Book     @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+  category    Category @relation(fields: [category_id], references: [category_id])
+
+  @@id([book_id, category_id])
+  @@map("book_categories")
+}
+
+model Author {
+  author_id Int          @id @default(autoincrement()) @map("author_id")
+  name      String       @unique
+  books     BookAuthor[]
+
+  @@map("authors")
+}
+
+model BookAuthor {
+  book_id   String
+  author_id Int
+  role      String  @default("")
+  book      Book   @relation(fields: [book_id], references: [book_id], onDelete: Cascade)
+  author    Author @relation(fields: [author_id], references: [author_id])
+
+  @@id([book_id, author_id, role])
+  @@map("book_authors")
 }
 
 model PriceHistory {

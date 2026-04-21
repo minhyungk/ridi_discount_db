@@ -61,6 +61,10 @@ class RidiScraper:
         """)
         # 기존 테이블용 마이그레이션 (신규 컬럼 추가)
         cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS list_order INTEGER")
+        cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS comic BOOLEAN")
+        cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS publisher TEXT")
+        cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS publication_date DATE")
+        cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS set_total INTEGER")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS price_history (
                 id SERIAL PRIMARY KEY,
@@ -71,6 +75,39 @@ class RidiScraper:
                 scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS categories (
+                category_id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                genre TEXT,
+                parent_id INTEGER
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS book_categories (
+                book_id VARCHAR(20) REFERENCES books(book_id) ON DELETE CASCADE,
+                category_id INTEGER REFERENCES categories(category_id),
+                PRIMARY KEY (book_id, category_id)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS authors (
+                author_id SERIAL PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS book_authors (
+                book_id VARCHAR(20) REFERENCES books(book_id) ON DELETE CASCADE,
+                author_id INTEGER REFERENCES authors(author_id),
+                role TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (book_id, author_id, role)
+            )
+        """)
+        # pg_trgm: 제목/카테고리명 퍼지 검색용
+        cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+        cur.execute("CREATE INDEX IF NOT EXISTS books_title_trgm ON books USING GIN (title gin_trgm_ops)")
+        cur.execute("CREATE INDEX IF NOT EXISTS categories_name_trgm ON categories USING GIN (name gin_trgm_ops)")
 
     def fetch_detail_html(self, book_id, max_retries=3):
         """상세 페이지 HTML을 curl_cffi(chrome 지문) + 지수 백오프 재시도로 가져옴."""
@@ -103,7 +140,8 @@ class RidiScraper:
                 print(f"  [SKIP] {book_id} bookDetail JSON not found")
                 return None
 
-            p_info = json.loads(m_detail.group(1)).get('price_info', {}) or {}
+            b_detail = json.loads(m_detail.group(1))
+            p_info = b_detail.get('price_info', {}) or {}
 
             def parse_date(d):
                 return d.get('date') if isinstance(d, dict) else d
@@ -138,20 +176,69 @@ class RidiScraper:
             traceback.print_exc()
             return None
 
+    def extract_metadata(self, book_data):
+        """리스트 API의 book dict에서 메타데이터 추출 (상세 페이지 불필요)."""
+        authors = []
+        for a in (book_data.get('authors') or []):
+            if isinstance(a, dict) and a.get('name'):
+                authors.append({'name': a['name'], 'role': a.get('role') or ''})
+            elif isinstance(a, str) and a:
+                authors.append({'name': a, 'role': ''})
+
+        categories = []
+        for c in (book_data.get('categories') or []):
+            if isinstance(c, dict) and c.get('category_id') and c.get('name'):
+                categories.append({
+                    'category_id': int(c['category_id']),
+                    'name': c['name'],
+                    'genre': c.get('genre'),
+                    'parent_id': c.get('parent_id'),
+                })
+
+        pub = book_data.get('publisher')
+        publisher = pub.get('name') if isinstance(pub, dict) else (pub if isinstance(pub, str) else None)
+
+        set_obj = book_data.get('set')
+        set_total = set_obj.get('total') if isinstance(set_obj, dict) else None
+
+        # comic은 file.comic 위치에 있음
+        file_obj = book_data.get('file') or {}
+        comic = file_obj.get('comic')
+        if not isinstance(comic, bool):
+            comic = None
+
+        publication_date = book_data.get('publication_date')  # ISO 문자열 (e.g., "2022-10-28T00:00:00+09:00")
+
+        return {
+            "authors": authors,
+            "categories": categories,
+            "publisher": publisher,
+            "set_total": set_total,
+            "comic": comic,
+            "publication_date": publication_date,
+        }
+
     def _upsert(self, cur, book_id, title, details, list_order):
         set_price = int(details.get('set_price', 0))
         discount_pct = int(details.get('discount_pct', 0))
 
-        # Upsert into books
+        # Upsert into books (메타데이터 컬럼 포함)
         cur.execute("""
-            INSERT INTO books (book_id, title, full_price, set_price, all_time_low, discount_pct, list_order)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO books (
+                book_id, title, full_price, set_price, all_time_low, discount_pct, list_order,
+                comic, publisher, publication_date, set_total
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (book_id) DO UPDATE SET
                 title = EXCLUDED.title,
                 full_price = EXCLUDED.full_price,
                 set_price = EXCLUDED.set_price,
                 discount_pct = EXCLUDED.discount_pct,
                 list_order = EXCLUDED.list_order,
+                comic = EXCLUDED.comic,
+                publisher = EXCLUDED.publisher,
+                publication_date = EXCLUDED.publication_date,
+                set_total = EXCLUDED.set_total,
                 all_time_low = CASE
                     WHEN books.all_time_low IS NULL OR books.all_time_low = 0 THEN EXCLUDED.set_price
                     ELSE LEAST(books.all_time_low, EXCLUDED.set_price)
@@ -162,8 +249,53 @@ class RidiScraper:
             details.get('full_price', 0),
             set_price, set_price,
             details.get('discount_pct', 0),
-            list_order
+            list_order,
+            details.get('comic'),
+            details.get('publisher'),
+            details.get('publication_date'),
+            details.get('set_total'),
         ))
+
+        # categories: 신규/변경 시 upsert
+        for cat in (details.get('categories') or []):
+            cur.execute("""
+                INSERT INTO categories (category_id, name, genre, parent_id)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (category_id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    genre = EXCLUDED.genre,
+                    parent_id = EXCLUDED.parent_id
+            """, (cat['category_id'], cat['name'], cat.get('genre'), cat.get('parent_id')))
+
+        # book_categories: 책 단위로 전체 삭제 후 재삽입 (delete-then-insert)
+        cur.execute("DELETE FROM book_categories WHERE book_id = %s", (book_id,))
+        cat_rows = list({(book_id, c['category_id']) for c in (details.get('categories') or [])})
+        if cat_rows:
+            cur.executemany(
+                "INSERT INTO book_categories (book_id, category_id) VALUES (%s, %s)",
+                cat_rows
+            )
+
+        # authors: 이름 기준 upsert + book_authors 재삽입
+        cur.execute("DELETE FROM book_authors WHERE book_id = %s", (book_id,))
+        seen = set()
+        for author in (details.get('authors') or []):
+            name = author['name']
+            role = author.get('role') or ''
+            if (name, role) in seen:
+                continue
+            seen.add((name, role))
+            cur.execute("""
+                INSERT INTO authors (name) VALUES (%s)
+                ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+                RETURNING author_id
+            """, (name,))
+            author_id = cur.fetchone()[0]
+            cur.execute("""
+                INSERT INTO book_authors (book_id, author_id, role)
+                VALUES (%s, %s, %s)
+                ON CONFLICT DO NOTHING
+            """, (book_id, author_id, role))
 
         # 가격 or 세일 시작일이 바뀌었을 때만 새 row 삽입.
         # 같은 가격이라도 start_date가 다르면 재세일 이벤트이므로 별개 row로 보존.
@@ -229,11 +361,14 @@ class RidiScraper:
             print(f"\n[RidiDB] {len(items)} books found\n")
 
             for i, item in enumerate(items, 1):
-                b_id = item['book']['book_id']
-                title = item['book']['title']
+                book_data = item['book']
+                b_id = book_data['book_id']
+                title = book_data['title']
 
-                details = self.extract_detail(b_id)
-                if details:
+                price_details = self.extract_detail(b_id)
+                if price_details:
+                    metadata = self.extract_metadata(book_data)
+                    details = {**price_details, **metadata}
                     print(f"  [{i}/{len(items)}]", end=" ")
                     self._upsert(cur, b_id, title, details, i - 1)
 

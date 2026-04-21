@@ -132,6 +132,60 @@ summary:hover { color: #1e9eff; }
   }
 }
 
+/* ── 카테고리 칩 ── */
+.chip-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+.chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #f5f5f7;
+  color: #1d1d1f;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.chip:hover {
+  background: #ebebed;
+}
+.chip-active {
+  background: #1e9eff;
+  color: #fff;
+  border-color: #1e9eff;
+}
+.chip-active:hover {
+  background: #0b87e8;
+}
+.chip-clear {
+  color: #6e6e73;
+  background: transparent;
+  border-color: transparent;
+}
+.chip-clear:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+@media (max-width: 768px) {
+  .chip-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .chip-strip::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* ── 캘린더 모바일 ── */
 @media (max-width: 768px) {
   .cal-cell {

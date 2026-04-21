@@ -44,11 +44,11 @@ export default async function BookDetail({
     }));
 
   // 세일 중: 마지막 가격이 오늘까지 유지됐음을 수평선으로 시각화
-  // 세일 종료: end_date 지점에서 정가로 수직 상승 (같은 ts의 두 포인트 = stepAfter 수직선)
+  // 세일 종료: end_date 지점에서 정가로 수직 상승 후 오늘까지 수평 연장
   if (chartData.length > 0) {
     const last = chartData[chartData.length - 1];
+    const nowTs = now.getTime();
     if (isOnSale) {
-      const nowTs = now.getTime();
       if (last.ts < nowTs) {
         chartData.push({ ts: nowTs, price: last.price });
       }
@@ -58,6 +58,9 @@ export default async function BookDetail({
         chartData.push({ ts: endTs, price: last.price });
       }
       chartData.push({ ts: endTs, price: book.full_price });
+      if (endTs < nowTs) {
+        chartData.push({ ts: nowTs, price: book.full_price });
+      }
     }
   }
 
