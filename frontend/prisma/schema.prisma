@@ -21,6 +21,7 @@ model Book {
   publisher        String?        @map("publisher")
   publication_date DateTime?      @map("publication_date") @db.Date
   set_total        Int?           @map("set_total")
+  introduction     String?        @map("introduction")
   updated_at       DateTime       @default(now()) @map("updated_at")
   histories        PriceHistory[]
   categories       BookCategory[]

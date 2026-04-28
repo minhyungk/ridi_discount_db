@@ -65,6 +65,7 @@ class RidiScraper:
         cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS publisher TEXT")
         cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS publication_date DATE")
         cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS set_total INTEGER")
+        cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS introduction TEXT")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS price_history (
                 id SERIAL PRIMARY KEY,
@@ -209,6 +210,13 @@ class RidiScraper:
 
         publication_date = book_data.get('publication_date')  # ISO 문자열 (e.g., "2022-10-28T00:00:00+09:00")
 
+        intro_obj = book_data.get('introduction')
+        introduction = intro_obj.get('description') if isinstance(intro_obj, dict) else None
+        if isinstance(introduction, str):
+            introduction = introduction.strip() or None
+        else:
+            introduction = None
+
         return {
             "authors": authors,
             "categories": categories,
@@ -216,6 +224,7 @@ class RidiScraper:
             "set_total": set_total,
             "comic": comic,
             "publication_date": publication_date,
+            "introduction": introduction,
         }
 
     def _upsert(self, cur, book_id, title, details, list_order):
@@ -226,9 +235,9 @@ class RidiScraper:
         cur.execute("""
             INSERT INTO books (
                 book_id, title, full_price, set_price, all_time_low, discount_pct, list_order,
-                comic, publisher, publication_date, set_total
+                comic, publisher, publication_date, set_total, introduction
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (book_id) DO UPDATE SET
                 title = EXCLUDED.title,
                 full_price = EXCLUDED.full_price,
@@ -239,6 +248,7 @@ class RidiScraper:
                 publisher = EXCLUDED.publisher,
                 publication_date = EXCLUDED.publication_date,
                 set_total = EXCLUDED.set_total,
+                introduction = COALESCE(EXCLUDED.introduction, books.introduction),
                 all_time_low = CASE
                     WHEN books.all_time_low IS NULL OR books.all_time_low = 0 THEN EXCLUDED.set_price
                     ELSE LEAST(books.all_time_low, EXCLUDED.set_price)
@@ -254,6 +264,7 @@ class RidiScraper:
             details.get('publisher'),
             details.get('publication_date'),
             details.get('set_total'),
+            details.get('introduction'),
         ))
 
         # categories: 신규/변경 시 upsert

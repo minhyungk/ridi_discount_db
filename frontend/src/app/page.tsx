@@ -16,7 +16,7 @@ type Filters = {
   cats: string[];
 };
 
-type Tag = "ending" | "new" | null;
+type Tag = "ending" | "new" | "popular" | null;
 type SortKey = "price" | "discount" | "period" | "low";
 type SortDir = "asc" | "desc";
 
@@ -141,9 +141,11 @@ type BookWithStatus = {
   set_price: number | null;
   discount_pct: number | null;
   all_time_low: number | null;
+  list_order: number | null;
   isOnSale: boolean;
   isEndingSoon: boolean;
   isNew: boolean;
+  daysLeft: number | null;
   lastHistory?: { start_date: Date | null; end_date: Date | null };
 };
 
@@ -167,7 +169,8 @@ export default async function HomePage({
     type: type === "comic" || type === "novel" ? type : null,
     cats: Array.isArray(cat) ? cat : cat ? [cat] : [],
   };
-  const activeTag: Tag = tag === "ending" || tag === "new" ? tag : null;
+  const activeTag: Tag =
+    tag === "ending" || tag === "new" || tag === "popular" ? tag : null;
   const activeSort: SortKey | null =
     sort && (SORT_KEYS as readonly string[]).includes(sort) ? (sort as SortKey) : null;
   const activeDir: SortDir = dir === "asc" || dir === "desc" ? dir : "desc";
@@ -184,9 +187,10 @@ export default async function HomePage({
     const endDate = h?.end_date ? new Date(h.end_date) : null;
     const startDate = h?.start_date ? new Date(h.start_date) : null;
     const isOnSale = !!(endDate && isAfter(endDate, now));
+    const daysLeft = isOnSale && endDate ? Math.max(0, differenceInDays(endDate, now)) : null;
     const isEndingSoon = isOnSale && endDate ? differenceInDays(endDate, now) <= 7 : false;
     const isNew = isOnSale && startDate ? differenceInDays(now, startDate) < 3 : false;
-    return { ...book, lastHistory: h, isOnSale, isEndingSoon, isNew };
+    return { ...book, lastHistory: h, isOnSale, isEndingSoon, isNew, daysLeft };
   });
 
   let filtered = query ? withStatus : withStatus.filter((b) => b.isOnSale);
@@ -214,6 +218,13 @@ export default async function HomePage({
     filtered.sort((a, b) => {
       const diff = valueOf(a) - valueOf(b);
       return activeDir === "asc" ? diff : -diff;
+    });
+  } else if (activeTag === "popular") {
+    // 인기순: 리스트 API 순서(list_order) 그대로
+    filtered.sort((a, b) => {
+      const ao = a.list_order ?? Number.POSITIVE_INFINITY;
+      const bo = b.list_order ?? Number.POSITIVE_INFINITY;
+      return ao - bo;
     });
   } else {
     // 기본 우선순위 버킷: 종료임박 → NEW → 일반 할인중 → 할인 종료
@@ -250,35 +261,7 @@ export default async function HomePage({
 
       <CategoryChips topCategories={topCategories} />
 
-      {activeTag && (
-        <div style={{ marginBottom: 16, fontSize: 13, color: "#6e6e73" }}>
-          필터:{" "}
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "2px 10px",
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 600,
-              color: activeTag === "ending" ? "#e0483e" : "#ca8a04",
-              background:
-                activeTag === "ending"
-                  ? "rgba(224,72,62,0.1)"
-                  : "rgba(202,138,4,0.12)",
-            }}
-          >
-            {activeTag === "ending" ? "종료 임박" : "NEW!"}
-          </span>{" "}
-          <Link
-            href={buildHref(state, { tag: null })}
-            style={{ color: BLUE, marginLeft: 4 }}
-          >
-            ✕ 해제
-          </Link>
-        </div>
-      )}
+      <SortTagPills state={state} />
 
       {total === 0 ? (
         <div
@@ -351,11 +334,56 @@ export default async function HomePage({
   );
 }
 
+/* ── 정렬/필터 pill 행 (인기순 · 종료 임박 · NEW!) ── */
+function SortTagPills({ state }: { state: SearchState }) {
+  const pills: { tag: Exclude<Tag, null>; label: string; color: string }[] = [
+    { tag: "popular", label: "인기순", color: BLUE },
+    { tag: "ending", label: "종료 임박", color: "#e0483e" },
+    { tag: "new", label: "NEW!", color: "#ca8a04" },
+  ];
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+        marginBottom: 16,
+      }}
+    >
+      {pills.map((p) => {
+        const active = state.tag === p.tag;
+        return (
+          <Link
+            key={p.tag}
+            href={buildHref(state, { tag: active ? null : p.tag })}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "6px 12px",
+              borderRadius: 999,
+              fontSize: 12,
+              fontWeight: 500,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+              color: active ? "#fff" : p.color,
+              background: active ? p.color : "transparent",
+              border: `1px solid ${p.color}`,
+              transition: "background 0.12s, color 0.12s",
+            }}
+          >
+            {p.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ── 모바일 카드 컴포넌트 ── */
 function BookCard({ book }: { book: BookWithStatus }) {
   const h = book.lastHistory;
   const hasDiscount = !!(book.discount_pct && book.discount_pct > 0 && book.isOnSale);
-  const isAtLow = book.set_price === book.all_time_low && book.isOnSale;
 
   const periodStr =
     h?.start_date && h?.end_date
@@ -398,7 +426,7 @@ function BookCard({ book }: { book: BookWithStatus }) {
           {book.title}
         </div>
 
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           {hasDiscount ? (
             <>
               <span style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
@@ -406,6 +434,9 @@ function BookCard({ book }: { book: BookWithStatus }) {
               </span>
               <span style={{ fontSize: 11, color: "#a1a1a6", textDecoration: "line-through" }}>
                 {book.full_price?.toLocaleString()}원
+              </span>
+              <span style={{ padding: "1px 8px", fontSize: 11, fontWeight: 700, color: "#fff", background: BLUE, borderRadius: 999 }}>
+                -{book.discount_pct}%
               </span>
             </>
           ) : (
@@ -416,11 +447,6 @@ function BookCard({ book }: { book: BookWithStatus }) {
         </div>
 
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          {hasDiscount && (
-            <span style={{ padding: "1px 8px", fontSize: 11, fontWeight: 700, color: "#fff", background: BLUE, borderRadius: 999 }}>
-              -{book.discount_pct}%
-            </span>
-          )}
           {book.isOnSale && (
             <span style={{ padding: "1px 8px", fontSize: 11, fontWeight: 600, color: BLUE, background: "rgba(30,158,255,0.1)", borderRadius: 999 }}>
               할인 중
@@ -438,12 +464,29 @@ function BookCard({ book }: { book: BookWithStatus }) {
           )}
         </div>
 
-        <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#6e6e73", marginTop: "auto" }}>
-          {periodStr && <span>{periodStr}</span>}
-          <span style={{ color: isAtLow ? BLUE : "#6e6e73", fontWeight: isAtLow ? 700 : 400 }}>
-            최저 {book.all_time_low?.toLocaleString()}원
-            {isAtLow && <span style={{ marginLeft: 2, color: BLUE, fontSize: 9, fontWeight: 700 }}>최저가</span>}
-          </span>
+        <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#6e6e73", marginTop: "auto", flexWrap: "wrap" }}>
+          {periodStr && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {periodStr}
+              {book.isOnSale && book.daysLeft != null && (
+                <span
+                  style={{
+                    display: "inline-block",
+                    padding: "2px 8px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    borderRadius: 999,
+                    color: book.isEndingSoon ? "#e0483e" : "#6e6e73",
+                    background: book.isEndingSoon
+                      ? "rgba(224,72,62,0.1)"
+                      : "rgba(0,0,0,0.06)",
+                  }}
+                >
+                  {book.daysLeft === 0 ? "오늘 종료" : `종료 D-${book.daysLeft}`}
+                </span>
+              )}
+            </span>
+          )}
         </div>
       </div>
     </Link>
@@ -639,7 +682,26 @@ function BookRow({ book, state }: { book: BookWithStatus; state: SearchState }) 
       </td>
 
       <td style={{ ...cell, textAlign: "center", whiteSpace: "nowrap", color: "#6e6e73", fontSize: 12 }}>
-        {periodStr}
+        <div>{periodStr}</div>
+        {book.isOnSale && book.daysLeft != null && (
+          <div style={{ marginTop: 6 }}>
+            <span
+              style={{
+                display: "inline-block",
+                padding: "2px 8px",
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 999,
+                color: book.isEndingSoon ? "#e0483e" : "#6e6e73",
+                background: book.isEndingSoon
+                  ? "rgba(224,72,62,0.1)"
+                  : "rgba(0,0,0,0.06)",
+              }}
+            >
+              {book.daysLeft === 0 ? "오늘 종료" : `종료 D-${book.daysLeft}`}
+            </span>
+          </div>
+        )}
       </td>
 
       <td style={{ ...cell, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", color: isAtLow ? BLUE : "#6e6e73", fontWeight: isAtLow ? 700 : 400 }}>

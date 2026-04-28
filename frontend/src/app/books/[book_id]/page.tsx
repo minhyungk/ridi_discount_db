@@ -13,7 +13,10 @@ async function getBookDetail(book_id: string) {
   const prisma = getPrisma();
   return prisma.book.findUnique({
     where: { book_id },
-    include: { histories: { orderBy: { scraped_at: "asc" } } },
+    include: {
+      histories: { orderBy: { scraped_at: "asc" } },
+      authors: { include: { author: true } },
+    },
   });
 }
 
@@ -33,8 +36,14 @@ export default async function BookDetail({
   const endDate = latest?.end_date ? new Date(latest.end_date) : null;
   const startDate = latest?.start_date ? new Date(latest.start_date) : null;
   const isOnSale = !!(endDate && isAfter(endDate, now));
+  const daysLeft = isOnSale && endDate ? Math.max(0, differenceInDays(endDate, now)) : null;
   const isEndingSoon = isOnSale && endDate ? differenceInDays(endDate, now) <= 7 : false;
   const isNew = isOnSale && startDate ? differenceInDays(now, startDate) < 3 : false;
+
+  const authorNames = Array.from(
+    new Set((book.authors ?? []).map((ba) => ba.author.name).filter(Boolean))
+  );
+  const synopsis = book.introduction?.trim() || null;
 
   const chartData: PricePoint[] = book.histories
     .filter((h) => h.set_price != null)
@@ -133,6 +142,7 @@ export default async function BookDetail({
             {isOnSale && (
               <>
                 <span
+                  className="detail-status-pill"
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -158,6 +168,7 @@ export default async function BookDetail({
                 </span>
                 {isNew && (
                   <span
+                    className="detail-status-pill"
                     style={{
                       display: "inline-block",
                       padding: "2px 8px",
@@ -173,6 +184,7 @@ export default async function BookDetail({
                 )}
                 {isEndingSoon && (
                   <span
+                    className="detail-status-pill"
                     style={{
                       display: "inline-block",
                       padding: "2px 8px",
@@ -186,9 +198,63 @@ export default async function BookDetail({
                     종료 임박
                   </span>
                 )}
+                {daysLeft != null && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "2px 8px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: isEndingSoon ? "#e0483e" : "#6e6e73",
+                      background: isEndingSoon
+                        ? "rgba(224,72,62,0.1)"
+                        : "rgba(0,0,0,0.06)",
+                      borderRadius: 999,
+                    }}
+                  >
+                    {daysLeft === 0 ? "오늘 종료" : `종료 D-${daysLeft}`}
+                  </span>
+                )}
               </>
             )}
           </div>
+          {authorNames.length > 0 && (
+            <div
+              style={{
+                marginTop: 14,
+                fontSize: 14,
+                color: "#3a3a3c",
+                lineHeight: 1.4,
+              }}
+            >
+              <span style={{ color: "#86868b", marginRight: 6 }}>작가</span>
+              {authorNames.join(", ")}
+            </div>
+          )}
+          {synopsis && (
+            <div
+              style={{
+                marginTop: 12,
+                fontSize: 13,
+                lineHeight: 1.7,
+                color: "#1d1d1f",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "#86868b",
+                  letterSpacing: "0.3px",
+                  marginBottom: 6,
+                }}
+              >
+                시놉시스
+              </div>
+              {synopsis}
+            </div>
+          )}
         </div>
       </header>
 
