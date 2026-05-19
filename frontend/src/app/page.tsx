@@ -5,7 +5,6 @@ import Link from "next/link";
 import CategoryChips from "@/components/CategoryChips";
 import type { Prisma } from "@prisma/client";
 
-export const runtime = "edge";
 export const revalidate = 3600;
 
 const BLUE = "#1e9eff";

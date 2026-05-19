@@ -64,3 +64,7 @@ CLAUDE.md
 .claude/
 DESIGN.md
 .open-next/
+
+# DB dumps
+*.sql
+*.dump

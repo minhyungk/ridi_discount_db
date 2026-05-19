@@ -1,13 +1,17 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaNeon } from "@prisma/adapter-neon";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 function createPrisma() {
-  const adapter = new PrismaNeon({ connectionString: process.env.DATABASE_URL });
+  // Supabase pooler(Supavisor)는 self-signed cert를 쓰므로 rejectUnauthorized=false.
+  // connectionString의 sslmode 파라미터는 explicit ssl 옵션과 충돌할 수 있어 제거.
+  const url = (process.env.DATABASE_URL ?? "").replace(/[?&]sslmode=[^&]*/g, "");
+  const adapter = new PrismaPg({
+    connectionString: url,
+    ssl: { rejectUnauthorized: false },
+  });
   return new PrismaClient({ adapter });
 }
 
-// 로컬: 싱글톤 (HMR 누수 방지)
-// edge 프로덕션: 매 호출마다 새 인스턴스 (Neon WebSocket이 isolate 간 재사용 시 "Connection closed" 발생)
 const globalForPrisma = global as unknown as { prisma?: PrismaClient };
 
 export function getPrisma(): PrismaClient {

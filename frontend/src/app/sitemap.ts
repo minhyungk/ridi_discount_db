@@ -2,7 +2,6 @@ import type { MetadataRoute } from "next";
 import { getPrisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
-export const runtime = "edge";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";

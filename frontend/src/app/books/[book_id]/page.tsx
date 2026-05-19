@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import PriceChart, { PricePoint } from "@/components/PriceChart";
 
-export const runtime = "edge";
 export const revalidate = 3600;
 
 const BLUE = "#1e9eff";

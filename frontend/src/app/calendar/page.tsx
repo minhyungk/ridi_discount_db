@@ -1,7 +1,6 @@
 import { getPrisma } from "@/lib/prisma";
 import Link from "next/link";
 
-export const runtime = "edge";
 export const revalidate = 3600;
 
 const BLUE = "#1e9eff";
