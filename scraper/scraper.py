@@ -1,5 +1,4 @@
 from curl_cffi import requests as http
-import requests as plain_requests  # list API only (JSON, no CF)
 import re
 import json
 import time
@@ -338,13 +337,22 @@ class RidiScraper:
         print(f"  {display_title:<30} | {set_price:>7,d}원 | -{discount_pct:>2d}% | {status}")
 
     def fetch_all_items(self):
-        """offset 페이지네이션으로 전체 세일 세트북 리스트 수집 (List API는 CF 밖)"""
+        """offset 페이지네이션으로 전체 세일 세트북 리스트 수집.
+        List API도 Cloudflare 보호 안으로 들어와서 curl_cffi(Chrome 지문) 세션 사용."""
         items = []
         offset = 0
         while True:
             url = f"{self.list_api_base}&limit={self.PAGE_SIZE}&offset={offset}"
-            r = plain_requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
-            batch = r.json().get('data', {}).get('items', [])
+            r = self.session.get(url, timeout=20)
+            if r.status_code != 200:
+                print(f"  [list] offset={offset} HTTP {r.status_code}, aborting")
+                break
+            try:
+                batch = r.json().get('data', {}).get('items', [])
+            except Exception:
+                snippet = (r.text or '')[:200].replace('\n', ' ')
+                print(f"  [list] offset={offset} non-JSON response: {snippet}")
+                break
             if not batch:
                 break
             items.extend(batch)
@@ -352,7 +360,7 @@ class RidiScraper:
             if len(batch) < self.PAGE_SIZE:
                 break
             offset += self.PAGE_SIZE
-            time.sleep(0.3)
+            time.sleep(0.5)
         return items
 
     def run(self):

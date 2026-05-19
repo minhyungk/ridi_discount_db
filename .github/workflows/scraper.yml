@@ -17,7 +17,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests curl_cffi psycopg2-binary python-dotenv
+        run: pip install curl_cffi psycopg2-binary python-dotenv
 
       - name: Run scraper
         working-directory: scraper
