@@ -190,10 +190,26 @@ export default async function HomePage({
   const activeDir: SortDir = dir === "asc" || dir === "desc" ? dir : "desc";
   const state: SearchState = { q: query, filters, tag: activeTag, sort: activeSort, dir: activeDir };
 
-  const [bookList, topCategories] = await Promise.all([
-    getBooks(query, filters),
-    getTopCategories(10),
-  ]);
+  let bookList: Awaited<ReturnType<typeof getBooks>> = [];
+  let topCategories: { name: string; count: number }[] = [];
+  try {
+    [bookList, topCategories] = await Promise.all([
+      getBooks(query, filters),
+      getTopCategories(10),
+    ]);
+  } catch (e) {
+    // DIAGNOSTIC: workers의 pg cause를 보기 위한 임시 로그.
+    const err = e as Error & { cause?: unknown };
+    const cause = err.cause as { code?: string; message?: string; detail?: string } | undefined;
+    console.error("home_query_failed", {
+      message: err.message,
+      causeCode: cause?.code,
+      causeMessage: cause?.message,
+      causeDetail: cause?.detail,
+      causeRaw: JSON.stringify(cause),
+    });
+    throw e;
+  }
   const now = new Date();
 
   const withStatus = bookList.map((book) => {
