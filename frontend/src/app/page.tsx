@@ -108,7 +108,7 @@ async function getBooks(query: string, filters: Filters) {
     LIMIT 200
   `);
 
-  const rankedRows = ranked.rows as { book_id: string; sim: number }[];
+  const rankedRows = ranked as { book_id: string; sim: number }[];
   if (rankedRows.length === 0) return [];
 
   const ids = rankedRows.map((r) => r.book_id);
@@ -145,7 +145,7 @@ async function getTopCategories(limit = 10) {
     ORDER BY count DESC
     LIMIT ${limit}
   `);
-  return (rows.rows as { name: string; count: number }[]).map((r) => ({ name: r.name, count: r.count }));
+  return (rows as { name: string; count: number }[]).map((r) => ({ name: r.name, count: r.count }));
 }
 
 type BookWithStatus = {

@@ -1,16 +1,20 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import * as schema from "@/db/schema";
 
 function createDb() {
-  // Supabase pooler(Supavisor)는 self-signed cert를 쓰므로 rejectUnauthorized=false.
-  // connectionString의 sslmode 파라미터는 explicit ssl 옵션과 충돌해서 제거.
-  const url = (process.env.DATABASE_URL ?? "").replace(/[?&]sslmode=[^&]*/g, "");
-  const pool = new Pool({
-    connectionString: url,
-    ssl: { rejectUnauthorized: false },
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is not configured");
+  }
+
+  const client = postgres(connectionString, {
+    prepare: false,
+    max: 1,
+    ssl: "require",
   });
-  return drizzle(pool, { schema });
+
+  return drizzle(client, { schema });
 }
 
 type DB = ReturnType<typeof createDb>;
