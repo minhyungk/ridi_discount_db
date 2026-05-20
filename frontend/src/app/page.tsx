@@ -3,7 +3,7 @@ import { format, formatDistanceToNow, isAfter, differenceInDays } from "date-fns
 import { ko } from "date-fns/locale/ko";
 import Link from "next/link";
 import CategoryChips from "@/components/CategoryChips";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 export const revalidate = 3600;
 
