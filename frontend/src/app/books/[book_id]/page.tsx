@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import PriceChart, { PricePoint } from "@/components/PriceChart";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 const BLUE = "#1e9eff";
 

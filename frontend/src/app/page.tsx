@@ -5,7 +5,9 @@ import Link from "next/link";
 import CategoryChips from "@/components/CategoryChips";
 import type { Prisma } from "@/generated/prisma/client";
 
-export const revalidate = 3600;
+// searchParams 사용으로 어차피 dynamic 페이지. force-dynamic으로 Next.js의
+// FileSystemCache lookup을 완전히 우회해야 workerd의 unenv fs.readFile 에러를 피함.
+export const dynamic = "force-dynamic";
 
 const BLUE = "#1e9eff";
 const PAGE_SIZE = 50;

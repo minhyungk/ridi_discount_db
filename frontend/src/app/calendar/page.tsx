@@ -1,7 +1,7 @@
 import { getPrisma } from "@/lib/prisma";
 import Link from "next/link";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 const BLUE = "#1e9eff";
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
