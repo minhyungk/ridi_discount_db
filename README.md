@@ -119,7 +119,7 @@ Manual run: **Actions → Daily scraper → Run workflow**.
 
 ## Tech Stack
 
-- **Frontend:** Next.js 15 (App Router, RSC, edge runtime), recharts, Prisma 6
+- **Frontend:** Next.js 15 (App Router, RSC, edge runtime), recharts, Prisma 6 
 - **Scraper:** Python 3.11, `curl_cffi` (Chrome TLS fingerprint), `psycopg2`
 - **Database:** PostgreSQL (Docker local / Neon serverless prod)
 - **Deploy:** Cloudflare Pages (`@cloudflare/next-on-pages`), GitHub Actions
