@@ -1,4 +1,6 @@
-import { getPrisma } from "@/lib/prisma";
+import { getDb } from "@/lib/db";
+import { priceHistory } from "@/db/schema";
+import { and, asc, gte, lt } from "drizzle-orm";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -16,13 +18,13 @@ type BookEnd = {
 };
 
 async function getMonthHistories(year: number, month: number) {
-  const prisma = getPrisma();
+  const db = getDb();
   const monthStart = new Date(year, month - 1, 1);
   const monthEnd = new Date(year, month, 1);
-  return prisma.priceHistory.findMany({
-    where: { end_date: { gte: monthStart, lt: monthEnd } },
-    include: { book: true },
-    orderBy: { end_date: "asc" },
+  return db.query.priceHistory.findMany({
+    where: and(gte(priceHistory.end_date, monthStart), lt(priceHistory.end_date, monthEnd)),
+    with: { book: true },
+    orderBy: [asc(priceHistory.end_date)],
   });
 }
 

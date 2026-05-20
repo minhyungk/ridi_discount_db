@@ -1,4 +1,6 @@
-import { getPrisma } from "@/lib/prisma";
+import { getDb } from "@/lib/db";
+import { books } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { format, isAfter, differenceInDays } from "date-fns";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -9,12 +11,16 @@ export const dynamic = "force-dynamic";
 const BLUE = "#1e9eff";
 
 async function getBookDetail(book_id: string) {
-  const prisma = getPrisma();
-  return prisma.book.findUnique({
-    where: { book_id },
-    include: {
-      histories: { orderBy: { scraped_at: "asc" } },
-      authors: { include: { author: true } },
+  const db = getDb();
+  return db.query.books.findFirst({
+    where: eq(books.book_id, book_id),
+    with: {
+      histories: {
+        orderBy: (h, { asc }) => [asc(h.scraped_at)],
+      },
+      authors: {
+        with: { author: true },
+      },
     },
   });
 }

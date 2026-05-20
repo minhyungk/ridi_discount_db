@@ -1,12 +1,11 @@
-import { getPrisma } from "@/lib/prisma";
+import { getDb } from "@/lib/db";
+import { books, bookCategories, categories } from "@/db/schema";
+import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { format, formatDistanceToNow, isAfter, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale/ko";
 import Link from "next/link";
 import CategoryChips from "@/components/CategoryChips";
-import type { Prisma } from "@/generated/prisma/client";
 
-// searchParams 사용으로 어차피 dynamic 페이지. force-dynamic으로 Next.js의
-// FileSystemCache lookup을 완전히 우회해야 workerd의 unenv fs.readFile 에러를 피함.
 export const dynamic = "force-dynamic";
 
 const BLUE = "#1e9eff";
@@ -53,38 +52,46 @@ function buildHref(state: SearchState, overrides: Partial<SearchState> = {}) {
   return qs ? `/?${qs}` : "/";
 }
 
-function buildWhere(filters: Filters): Prisma.BookWhereInput {
-  const where: Prisma.BookWhereInput = {};
-  if (filters.type === "comic") where.comic = true;
-  else if (filters.type === "novel") where.comic = false;
+function buildBookFilter(filters: Filters): SQL | undefined {
+  const conds: SQL[] = [];
+  if (filters.type === "comic") conds.push(eq(books.comic, true));
+  else if (filters.type === "novel") conds.push(eq(books.comic, false));
   if (filters.cats.length > 0) {
-    where.categories = {
-      some: { category: { name: { in: filters.cats } } },
-    };
+    const sub = getDb()
+      .select({ id: bookCategories.book_id })
+      .from(bookCategories)
+      .innerJoin(categories, eq(categories.category_id, bookCategories.category_id))
+      .where(inArray(categories.name, filters.cats));
+    conds.push(inArray(books.book_id, sub));
   }
-  return where;
+  if (conds.length === 0) return undefined;
+  if (conds.length === 1) return conds[0];
+  return and(...conds);
 }
 
 async function getBooks(query: string, filters: Filters) {
-  const prisma = getPrisma();
-  const filterWhere = buildWhere(filters);
+  const db = getDb();
+  const filterWhere = buildBookFilter(filters);
 
   if (!query) {
-    return prisma.book.findMany({
+    return db.query.books.findMany({
       where: filterWhere,
-      include: {
-        histories: { orderBy: { scraped_at: "desc" }, take: 1 },
+      with: {
+        histories: {
+          orderBy: (h, { desc }) => [desc(h.scraped_at)],
+          limit: 1,
+        },
       },
       orderBy: [
-        { list_order: { sort: "asc", nulls: "last" } },
-        { discount_pct: "desc" },
+        sql`${books.list_order} ASC NULLS LAST`,
+        desc(books.discount_pct),
       ],
     });
   }
 
   // 퍼지 검색: pg_trgm으로 제목/카테고리명 모두 매칭, similarity 내림차순
   // (DISTINCT로 중복 제거, ILIKE는 짧은 쿼리(<3자) trgm 약화 대비 fallback)
-  const ranked = await prisma.$queryRaw<{ book_id: string; sim: number }[]>`
+  const ranked = await db.execute<{ book_id: string; sim: number }>(sql`
     SELECT b.book_id,
            GREATEST(
              similarity(b.title, ${query}),
@@ -99,29 +106,35 @@ async function getBooks(query: string, filters: Filters) {
     GROUP BY b.book_id
     ORDER BY sim DESC, MIN(b.list_order) ASC NULLS LAST
     LIMIT 200
-  `;
+  `);
 
-  if (ranked.length === 0) return [];
+  const rankedRows = ranked.rows as { book_id: string; sim: number }[];
+  if (rankedRows.length === 0) return [];
 
-  const ids = ranked.map((r) => r.book_id);
-  const books = await prisma.book.findMany({
-    where: { ...filterWhere, book_id: { in: ids } },
-    include: {
-      histories: { orderBy: { scraped_at: "desc" }, take: 1 },
+  const ids = rankedRows.map((r) => r.book_id);
+  const matched = await db.query.books.findMany({
+    where: filterWhere
+      ? and(filterWhere, inArray(books.book_id, ids))
+      : inArray(books.book_id, ids),
+    with: {
+      histories: {
+        orderBy: (h, { desc }) => [desc(h.scraped_at)],
+        limit: 1,
+      },
     },
   });
 
   // similarity 순서 보존
   const order = new Map(ids.map((id, i) => [id, i]));
-  books.sort((a, b) => (order.get(a.book_id) ?? 1e9) - (order.get(b.book_id) ?? 1e9));
-  return books;
+  matched.sort((a, b) => (order.get(a.book_id) ?? 1e9) - (order.get(b.book_id) ?? 1e9));
+  return matched;
 }
 
 async function getTopCategories(limit = 10) {
-  const prisma = getPrisma();
+  const db = getDb();
   // 활성 할인중 책의 카테고리 빈도 상위 N개. 최상위(parent_id=0) 카테고리 제외 — 만화/라노벨 토글이 이미 커버.
-  const rows = await prisma.$queryRaw<{ name: string; count: bigint }[]>`
-    SELECT c.name, COUNT(*)::bigint AS count
+  const rows = await db.execute<{ name: string; count: number }>(sql`
+    SELECT c.name, COUNT(*)::int AS count
     FROM book_categories bc
     JOIN categories c ON c.category_id = bc.category_id
     JOIN books b ON b.book_id = bc.book_id
@@ -131,8 +144,8 @@ async function getTopCategories(limit = 10) {
     GROUP BY c.name
     ORDER BY count DESC
     LIMIT ${limit}
-  `;
-  return rows.map((r) => ({ name: r.name, count: Number(r.count) }));
+  `);
+  return (rows.rows as { name: string; count: number }[]).map((r) => ({ name: r.name, count: r.count }));
 }
 
 type BookWithStatus = {
@@ -177,13 +190,13 @@ export default async function HomePage({
   const activeDir: SortDir = dir === "asc" || dir === "desc" ? dir : "desc";
   const state: SearchState = { q: query, filters, tag: activeTag, sort: activeSort, dir: activeDir };
 
-  const [books, topCategories] = await Promise.all([
+  const [bookList, topCategories] = await Promise.all([
     getBooks(query, filters),
     getTopCategories(10),
   ]);
   const now = new Date();
 
-  const withStatus = books.map((book) => {
+  const withStatus = bookList.map((book) => {
     const h = book.histories[0];
     const endDate = h?.end_date ? new Date(h.end_date) : null;
     const startDate = h?.start_date ? new Date(h.start_date) : null;
