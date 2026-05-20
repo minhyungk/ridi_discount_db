@@ -108,6 +108,10 @@ class RidiScraper:
         cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
         cur.execute("CREATE INDEX IF NOT EXISTS books_title_trgm ON books USING GIN (title gin_trgm_ops)")
         cur.execute("CREATE INDEX IF NOT EXISTS categories_name_trgm ON categories USING GIN (name gin_trgm_ops)")
+        cur.execute("CREATE INDEX IF NOT EXISTS books_active_order_idx ON books (list_order, discount_pct DESC) WHERE list_order IS NOT NULL")
+        cur.execute("CREATE INDEX IF NOT EXISTS price_history_book_scraped_idx ON price_history (book_id, scraped_at DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS price_history_end_date_idx ON price_history (end_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS book_categories_category_idx ON book_categories (category_id)")
 
     def fetch_detail_html(self, book_id, max_retries=3):
         """상세 페이지 HTML을 curl_cffi(chrome 지문) + 지수 백오프 재시도로 가져옴."""

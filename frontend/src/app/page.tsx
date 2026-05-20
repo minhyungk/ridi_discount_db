@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/db";
 import { books, bookCategories, categories } from "@/db/schema";
-import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
 import { format, formatDistanceToNow, isAfter, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale/ko";
 import Link from "next/link";
@@ -74,8 +74,12 @@ async function getBooks(query: string, filters: Filters) {
   const filterWhere = buildBookFilter(filters);
 
   if (!query) {
+    const activeWhere = filterWhere
+      ? and(filterWhere, isNotNull(books.list_order))
+      : isNotNull(books.list_order);
+
     return db.query.books.findMany({
-      where: filterWhere,
+      where: activeWhere,
       with: {
         histories: {
           orderBy: (h, { desc }) => [desc(h.scraped_at)],
