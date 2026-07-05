@@ -12,7 +12,7 @@ const BLUE = "#1e9eff";
 
 async function getBookDetail(book_id: string) {
   const db = getDb();
-  return db.query.books.findFirst({
+  const book = await db.query.books.findFirst({
     where: eq(books.book_id, book_id),
     with: {
       histories: {
@@ -23,6 +23,101 @@ async function getBookDetail(book_id: string) {
       },
     },
   });
+  if (!book) return null;
+
+  // 권수 갱신으로 book_id가 바뀐 같은 시리즈의 예전/다른 세트 히스토리까지 병합
+  let seriesBooks: SeriesBookLike[] = [book];
+  if (book.series_id != null) {
+    const siblings = await db.query.books.findMany({
+      where: eq(books.series_id, book.series_id),
+      with: {
+        histories: {
+          orderBy: (h, { asc }) => [asc(h.scraped_at)],
+        },
+      },
+    });
+    if (siblings.length > 0) seriesBooks = siblings;
+  }
+
+  return { book, seriesBooks };
+}
+
+type SeriesBookLike = {
+  book_id: string;
+  full_price: number | null;
+  set_type: string | null;
+  set_total: number | null;
+  histories: {
+    set_price: number | null;
+    start_date: Date | string | null;
+    end_date: Date | string | null;
+    scraped_at: Date | string;
+    full_price: number | null;
+  }[];
+};
+
+type SaleEntry = {
+  start: number;
+  scraped: number;
+  end: number | null;
+  price: number;
+  fullPrice: number | null;
+  note: string | null;
+};
+
+const DAY_MS = 86_400_000;
+
+/**
+ * 세일 이벤트들(start~end 구간 할인가)로부터 정가↔할인가 계단 타임라인 합성.
+ * stepAfter 렌더링 전제: 각 점의 가격이 다음 점까지 유지된다.
+ */
+function buildChartData(raw: SaleEntry[], nowTs: number): PricePoint[] {
+  const entries = [...raw].sort(
+    (a, b) => a.start - b.start || a.scraped - b.scraped
+  );
+  const pts: PricePoint[] = [];
+
+  entries.forEach((e, i) => {
+    const prev = entries[i - 1];
+    const next = entries[i + 1];
+    // 같은 세일 내 가격 변동(동일 start의 후속 row)은 발견 시점에 반영
+    const startTs =
+      prev && prev.start === e.start ? Math.max(e.scraped, e.start) : e.start;
+
+    // 첫 세일 전: 정가 구간을 짧게 보여줘서 "하락" 계단이 보이게
+    if (!prev && e.fullPrice != null) {
+      pts.push({ ts: startTs - 7 * DAY_MS, price: e.fullPrice, note: null });
+    }
+
+    pts.push({ ts: startTs, price: e.price, note: e.note });
+
+    let endTs = e.end;
+    if (endTs != null && endTs < startTs) endTs = null;
+    if (next && endTs != null && endTs > next.start) endTs = next.start;
+
+    // 세일 종료 후 정가 복귀 (다음 세일 시작 전까지의 구간)
+    const boundary = next ? next.start : nowTs;
+    if (
+      endTs != null &&
+      endTs <= nowTs &&
+      endTs < boundary &&
+      e.fullPrice != null
+    ) {
+      pts.push({ ts: endTs, price: e.fullPrice, note: null });
+    }
+
+    // 마지막 이벤트: 오늘까지 수평 연장
+    if (!next) {
+      const onSaleNow = endTs == null || endTs > nowTs;
+      if (onSaleNow) {
+        if (startTs < nowTs) pts.push({ ts: nowTs, price: e.price, note: e.note });
+      } else if (e.fullPrice != null && endTs < nowTs) {
+        pts.push({ ts: nowTs, price: e.fullPrice, note: null });
+      }
+    }
+  });
+
+  return pts;
 }
 
 export default async function BookDetail({
@@ -32,9 +127,10 @@ export default async function BookDetail({
 }) {
   const { book_id } = await params;
 
-  const book = await getBookDetail(book_id);
+  const detail = await getBookDetail(book_id);
 
-  if (!book) notFound();
+  if (!detail) notFound();
+  const { book, seriesBooks } = detail;
 
   const now = new Date();
   const latest = book.histories[book.histories.length - 1];
@@ -50,33 +146,34 @@ export default async function BookDetail({
   );
   const synopsis = book.introduction?.trim() || null;
 
-  const chartData: PricePoint[] = book.histories
-    .filter((h) => h.set_price != null)
-    .map((h) => ({
-      ts: new Date(h.scraped_at).getTime(),
-      price: h.set_price as number,
-    }));
+  // 시리즈 내 모든 세트의 세일 이벤트를 하나의 타임라인으로
+  const saleEntries: SaleEntry[] = seriesBooks.flatMap((b) => {
+    const note =
+      [b.set_type, b.set_total ? `총 ${b.set_total}권` : null]
+        .filter(Boolean)
+        .join(" · ") || null;
+    return b.histories
+      .filter((h) => h.set_price != null)
+      .map((h) => {
+        const scraped = new Date(h.scraped_at).getTime();
+        return {
+          start: h.start_date ? new Date(h.start_date).getTime() : scraped,
+          scraped,
+          end: h.end_date ? new Date(h.end_date).getTime() : null,
+          price: h.set_price as number,
+          // 세일 당시 정가가 기록돼 있으면 그걸, 없으면(과거 데이터) 해당 세트의 현재 정가
+          fullPrice: h.full_price ?? b.full_price ?? null,
+          note,
+        };
+      });
+  });
 
-  // 세일 중: 마지막 가격이 오늘까지 유지됐음을 수평선으로 시각화
-  // 세일 종료: end_date 지점에서 정가로 수직 상승 후 오늘까지 수평 연장
-  if (chartData.length > 0) {
-    const last = chartData[chartData.length - 1];
-    const nowTs = now.getTime();
-    if (isOnSale) {
-      if (last.ts < nowTs) {
-        chartData.push({ ts: nowTs, price: last.price });
-      }
-    } else if (endDate && book.full_price && isAfter(now, endDate)) {
-      const endTs = endDate.getTime();
-      if (last.ts < endTs) {
-        chartData.push({ ts: endTs, price: last.price });
-      }
-      chartData.push({ ts: endTs, price: book.full_price });
-      if (endTs < nowTs) {
-        chartData.push({ ts: nowTs, price: book.full_price });
-      }
-    }
-  }
+  const chartData: PricePoint[] = buildChartData(saleEntries, now.getTime());
+
+  // 역대 최저가: 시리즈 전체 히스토리 기준 (이전 세트 시절 포함)
+  const salePrices = saleEntries.map((e) => e.price);
+  if (book.all_time_low != null) salePrices.push(book.all_time_low);
+  const allTimeLow = salePrices.length > 0 ? Math.min(...salePrices) : null;
 
   // "현재 할인 중" (세일 종료 후에는 false)
   const hasDiscount = !!(book.discount_pct && book.discount_pct > 0 && isOnSale);
@@ -136,6 +233,22 @@ export default async function BookDetail({
             {book.title}
           </h1>
           <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {book.set_type && (
+              <span
+                className="detail-status-pill"
+                style={{
+                  display: "inline-block",
+                  padding: "2px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#6e6e73",
+                  background: "rgba(0,0,0,0.06)",
+                  borderRadius: 999,
+                }}
+              >
+                {book.set_type}
+              </span>
+            )}
             <a
               href={`https://ridibooks.com/books/${book.book_id}`}
               target="_blank"
@@ -284,7 +397,7 @@ export default async function BookDetail({
         />
         <StatCard
           label="역대 최저가"
-          value={`${book.all_time_low?.toLocaleString() ?? "—"}원`}
+          value={`${allTimeLow?.toLocaleString() ?? "—"}원`}
         />
         {latest?.start_date && latest?.end_date && (
           <StatCard
@@ -308,16 +421,28 @@ export default async function BookDetail({
             fontSize: 16,
             fontWeight: 600,
             color: "#1d1d1f",
-            marginBottom: 12,
+            marginBottom: seriesBooks.length > 1 ? 4 : 12,
             padding: "0 8px",
           }}
         >
           가격 히스토리
         </h2>
+        {seriesBooks.length > 1 && (
+          <p
+            style={{
+              fontSize: 12,
+              color: "#6e6e73",
+              margin: "0 0 12px",
+              padding: "0 8px",
+            }}
+          >
+            같은 시리즈의 이전 세트 기록 포함 ({seriesBooks.length}개 세트)
+          </p>
+        )}
         <PriceChart
           data={chartData}
           fullPrice={book.full_price}
-          allTimeLow={book.all_time_low}
+          allTimeLow={allTimeLow}
         />
       </section>
     </main>

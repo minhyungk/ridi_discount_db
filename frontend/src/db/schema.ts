@@ -10,6 +10,12 @@ import {
   timestamp,
 } from "drizzle-orm/pg-core";
 
+export const series = pgTable("series", {
+  series_id: serial("series_id").primaryKey(),
+  name: text("name").notNull(),
+  norm_key: text("norm_key").notNull().unique(),
+});
+
 export const books = pgTable("books", {
   book_id: text("book_id").primaryKey(),
   title: text("title").notNull(),
@@ -23,6 +29,8 @@ export const books = pgTable("books", {
   publication_date: date("publication_date"),
   set_total: integer("set_total"),
   introduction: text("introduction"),
+  set_type: text("set_type"),
+  series_id: integer("series_id"),
   updated_at: timestamp("updated_at", { withTimezone: false }).notNull().defaultNow(),
 });
 
@@ -64,12 +72,22 @@ export const priceHistory = pgTable("price_history", {
   start_date: timestamp("start_date", { withTimezone: false }),
   end_date: timestamp("end_date", { withTimezone: false }),
   scraped_at: timestamp("scraped_at", { withTimezone: false }).notNull().defaultNow(),
+  full_price: integer("full_price"),
+  discount_pct: integer("discount_pct"),
 });
 
-export const booksRelations = relations(books, ({ many }) => ({
+export const booksRelations = relations(books, ({ one, many }) => ({
   histories: many(priceHistory),
   categories: many(bookCategories),
   authors: many(bookAuthors),
+  series: one(series, {
+    fields: [books.series_id],
+    references: [series.series_id],
+  }),
+}));
+
+export const seriesRelations = relations(series, ({ many }) => ({
+  books: many(books),
 }));
 
 export const categoriesRelations = relations(categories, ({ many }) => ({

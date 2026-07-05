@@ -17,6 +17,7 @@ const BLUE = "#1e9eff";
 export type PricePoint = {
   ts: number; // timestamp (ms)
   price: number;
+  note?: string | null; // 세트 정보 (예: "완결 세트 · 총 13권") — 툴팁 표시용
 };
 
 const DAY_MS = 86_400_000;
@@ -105,7 +106,10 @@ export default function PriceChart({
               borderRadius: 8,
               fontSize: 12,
             }}
-            formatter={(v: number) => [`${v.toLocaleString()}원`, "가격"]}
+            formatter={(v: number, _name, item) => {
+              const note = (item?.payload as PricePoint | undefined)?.note;
+              return [`${v.toLocaleString()}원${note ? ` · ${note}` : ""}`, "가격"];
+            }}
             labelFormatter={(ts: number) => fmtLong(ts)}
             labelStyle={{ color: "#1d1d1f", fontWeight: 600 }}
           />

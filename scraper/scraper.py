@@ -21,6 +21,52 @@ def _date_key(d):
         return d.strftime("%Y-%m-%d")
     return str(d)[:10]
 
+
+# ── 시리즈 정규화 ──────────────────────────────────────────────
+# 세트 권수가 늘어나면 Ridi가 새 book_id를 발급하므로, 권수/세트종류를
+# 제거한 "시리즈명 + 출판사"를 키로 같은 시리즈를 이어붙인다.
+_SET_TYPE_RE = re.compile(r'(특별|완결|합본|단독|전권)\s*세트')
+# 권수/세트/완결 등 메타정보만 담긴 괄호는 통째로 제거 — 예: (총 5권/완결), [전 8권]
+_BRACKET_META_RE = re.compile(r'[\(\[\{【][^\)\]\}】]*?(?:권|세트|완결|합본|특별)[^\)\]\}】]*?[\)\]\}】]')
+_VOL_RES = [
+    re.compile(r'\d+\s*[-~〜–]\s*\d+\s*권'),   # 1-14권, 1~14권
+    re.compile(r'(?:총|전)\s*\d+\s*권'),        # 총 14권, 전14권
+    re.compile(r'\d+\s*권'),                    # 남은 14권
+]
+
+
+def extract_set_type(title):
+    """제목에서 세트 종류 수식어 추출 ('특별 세트', '완결 세트', ...). 일반 세트는 None."""
+    m = _SET_TYPE_RE.search(title or '')
+    return f"{m.group(1)} 세트" if m else None
+
+
+def series_display_name(title):
+    """권수·세트종류·괄호를 제거한 순수 시리즈명. 실패 시 원제목 반환."""
+    t = title or ''
+    t = _BRACKET_META_RE.sub(' ', t)
+    for rx in _VOL_RES:
+        t = rx.sub(' ', t)
+    t = _SET_TYPE_RE.sub(' ', t)
+    t = re.sub(r'세트|완결', ' ', t)
+    t = re.sub(r'[\[\]\(\)\{\}【】]', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip(' -–—·,+&/').strip()
+    return t or (title or '').strip()
+
+
+_RANGE_START_RE = re.compile(r'(\d+)\s*[-~〜–]\s*\d+\s*권')
+
+
+def _vol_start(title):
+    """권수 범위의 시작 번호. '21~40권'이면 '21' — 분할 세트(1부/2부)를 서로 다른
+    시리즈로 구분하기 위함. 범위가 없으면(예: '총 12권') 전체 세트로 보고 '1'."""
+    m = _RANGE_START_RE.search(title or '')
+    return m.group(1) if m else '1'
+
+
+def series_norm_key(title, publisher):
+    return f"{series_display_name(title).lower()}|{_vol_start(title)}|{(publisher or '').strip().lower()}"
+
 db_config = {
     'dbname': os.getenv('DB_NAME'),
     'user': os.getenv('DB_USER'),
@@ -65,6 +111,15 @@ class RidiScraper:
         cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS publication_date DATE")
         cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS set_total INTEGER")
         cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS introduction TEXT")
+        cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS set_type TEXT")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS series (
+                series_id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                norm_key TEXT UNIQUE NOT NULL
+            )
+        """)
+        cur.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS series_id INTEGER REFERENCES series(series_id)")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS price_history (
                 id SERIAL PRIMARY KEY,
@@ -75,6 +130,9 @@ class RidiScraper:
                 scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # 세일 당시 정가/할인율 — 세트 권수 변화로 정가가 바뀌어도 과거를 복원 가능하게
+        cur.execute("ALTER TABLE price_history ADD COLUMN IF NOT EXISTS full_price INTEGER")
+        cur.execute("ALTER TABLE price_history ADD COLUMN IF NOT EXISTS discount_pct INTEGER")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS categories (
                 category_id INTEGER PRIMARY KEY,
@@ -112,6 +170,31 @@ class RidiScraper:
         cur.execute("CREATE INDEX IF NOT EXISTS price_history_book_scraped_idx ON price_history (book_id, scraped_at DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS price_history_end_date_idx ON price_history (end_date)")
         cur.execute("CREATE INDEX IF NOT EXISTS book_categories_category_idx ON book_categories (category_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS books_series_idx ON books (series_id)")
+
+    def _ensure_series(self, cur, title, publisher):
+        """norm_key 기준 series upsert 후 series_id 반환. 표시명은 최신 제목 기준으로 갱신."""
+        key = series_norm_key(title, publisher)
+        name = series_display_name(title)
+        cur.execute("""
+            INSERT INTO series (name, norm_key) VALUES (%s, %s)
+            ON CONFLICT (norm_key) DO UPDATE SET name = EXCLUDED.name
+            RETURNING series_id
+        """, (name, key))
+        return cur.fetchone()[0]
+
+    def backfill_series(self, cur):
+        """series_id 없는 기존 책들(과거 세일 종료분 포함)에 시리즈 연결. 매 런 무해하게 재실행됨."""
+        cur.execute("SELECT book_id, title, publisher FROM books WHERE series_id IS NULL")
+        rows = cur.fetchall()
+        for book_id, title, publisher in rows:
+            sid = self._ensure_series(cur, title, publisher)
+            cur.execute(
+                "UPDATE books SET series_id = %s, set_type = COALESCE(set_type, %s) WHERE book_id = %s",
+                (sid, extract_set_type(title), book_id),
+            )
+        if rows:
+            print(f"[series] backfilled {len(rows)} books")
 
     def fetch_detail_html(self, book_id, max_retries=3):
         """상세 페이지 HTML을 curl_cffi(chrome 지문) + 지수 백오프 재시도로 가져옴."""
@@ -233,14 +316,17 @@ class RidiScraper:
     def _upsert(self, cur, book_id, title, details, list_order):
         set_price = int(details.get('set_price', 0))
         discount_pct = int(details.get('discount_pct', 0))
+        full_price = details.get('full_price', 0)
+        series_id = self._ensure_series(cur, title, details.get('publisher'))
+        set_type = extract_set_type(title)
 
         # Upsert into books (메타데이터 컬럼 포함)
         cur.execute("""
             INSERT INTO books (
                 book_id, title, full_price, set_price, all_time_low, discount_pct, list_order,
-                comic, publisher, publication_date, set_total, introduction
+                comic, publisher, publication_date, set_total, introduction, series_id, set_type
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (book_id) DO UPDATE SET
                 title = EXCLUDED.title,
                 full_price = EXCLUDED.full_price,
@@ -252,6 +338,8 @@ class RidiScraper:
                 publication_date = EXCLUDED.publication_date,
                 set_total = EXCLUDED.set_total,
                 introduction = COALESCE(EXCLUDED.introduction, books.introduction),
+                series_id = EXCLUDED.series_id,
+                set_type = EXCLUDED.set_type,
                 all_time_low = CASE
                     WHEN books.all_time_low IS NULL OR books.all_time_low = 0 THEN EXCLUDED.set_price
                     ELSE LEAST(books.all_time_low, EXCLUDED.set_price)
@@ -259,15 +347,17 @@ class RidiScraper:
                 updated_at = CURRENT_TIMESTAMP;
         """, (
             book_id, title,
-            details.get('full_price', 0),
+            full_price,
             set_price, set_price,
-            details.get('discount_pct', 0),
+            discount_pct,
             list_order,
             details.get('comic'),
             details.get('publisher'),
             details.get('publication_date'),
             details.get('set_total'),
             details.get('introduction'),
+            series_id,
+            set_type,
         ))
 
         # categories: 신규/변경 시 upsert
@@ -314,7 +404,7 @@ class RidiScraper:
         # 가격 or 세일 시작일이 바뀌었을 때만 새 row 삽입.
         # 같은 가격이라도 start_date가 다르면 재세일 이벤트이므로 별개 row로 보존.
         cur.execute("""
-            SELECT set_price, start_date FROM price_history
+            SELECT id, set_price, start_date, end_date FROM price_history
             WHERE book_id = %s
             ORDER BY scraped_at DESC LIMIT 1
         """, (book_id,))
@@ -324,17 +414,34 @@ class RidiScraper:
         new_end = details.get('end_date')
         changed = (
             not last
-            or last[0] != set_price
-            or _date_key(last[1]) != _date_key(new_start)
+            or last[1] != set_price
+            or _date_key(last[2]) != _date_key(new_start)
         )
 
         if changed:
             cur.execute("""
-                INSERT INTO price_history (book_id, set_price, start_date, end_date)
-                VALUES (%s, %s, %s, %s)
-            """, (book_id, set_price, new_start, new_end))
+                INSERT INTO price_history (book_id, set_price, start_date, end_date, full_price, discount_pct)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (book_id, set_price, new_start, new_end, full_price, discount_pct))
             status = "NEW"
+        elif _date_key(last[3]) != _date_key(new_end):
+            # 같은 세일인데 종료일만 바뀜 = 연장/단축 → 기존 row 갱신 (새 이벤트 아님)
+            cur.execute("""
+                UPDATE price_history
+                SET end_date = %s,
+                    full_price = COALESCE(full_price, %s),
+                    discount_pct = COALESCE(discount_pct, %s)
+                WHERE id = %s
+            """, (new_end, full_price, discount_pct, last[0]))
+            status = "extended"
         else:
+            # 변화 없음 — 과거 기록의 빈 정가/할인율만 소급 채움 (기존 데이터 보존, NULL만)
+            cur.execute("""
+                UPDATE price_history
+                SET full_price = COALESCE(full_price, %s),
+                    discount_pct = COALESCE(discount_pct, %s)
+                WHERE id = %s AND (full_price IS NULL OR discount_pct IS NULL)
+            """, (full_price, discount_pct, last[0]))
             status = "same"
 
         display_title = (title[:25] + '..') if len(title) > 25 else title
@@ -372,6 +479,9 @@ class RidiScraper:
         cur = conn.cursor()
         try:
             self.init_db(cur)
+            conn.commit()
+
+            self.backfill_series(cur)
             conn.commit()
 
             # 매 런 시작 시 list_order 초기화 —
