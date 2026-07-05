@@ -8,6 +8,12 @@
     "binding": "ASSETS",
     "directory": ".open-next/assets"
   },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "4090f575c2714ef5bf013885ad26da84"
+    }
+  ],
   "kv_namespaces": [
     {
       "binding": "NEXT_INC_CACHE_KV",
