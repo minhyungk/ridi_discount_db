@@ -11,7 +11,9 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "4090f575c2714ef5bf013885ad26da84"
+      "id": "4090f575c2714ef5bf013885ad26da84",
+      // deploy 시 로컬 에뮬레이션 검사 통과용 더미 — 실제 접속에는 사용되지 않음
+      "localConnectionString": "postgresql://dummy:dummy@localhost:5432/dummy"
     }
   ],
   "kv_namespaces": [
