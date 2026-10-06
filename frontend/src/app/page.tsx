@@ -95,20 +95,37 @@ async function getBooks(query: string, filters: Filters) {
 
   // 퍼지 검색: pg_trgm으로 제목/카테고리명 모두 매칭, similarity 내림차순
   // (DISTINCT로 중복 제거, ILIKE는 짧은 쿼리(<3자) trgm 약화 대비 fallback)
+  // 같은 시리즈의 여러 세트는 최신 세트(updated_at 기준) 하나만 노출 —
+  // 순위는 시리즈 내 가장 잘 매칭된 세트 기준, 이전 세트 기록은 상세 페이지 차트에서 병합
   const ranked = await db.execute<{ book_id: string; sim: number }>(sql`
-    SELECT b.book_id,
-           GREATEST(
-             similarity(b.title, ${query}),
-             COALESCE(MAX(similarity(c.name, ${query})), 0)
-           )::float AS sim
-    FROM books b
-    LEFT JOIN book_categories bc ON bc.book_id = b.book_id
-    LEFT JOIN categories c ON c.category_id = bc.category_id
-    WHERE b.title % ${query}
-       OR c.name % ${query}
-       OR b.title ILIKE ${"%" + query + "%"}
-    GROUP BY b.book_id
-    ORDER BY sim DESC, MIN(b.list_order) ASC NULLS LAST
+    WITH matched AS (
+      SELECT b.book_id,
+             COALESCE('s' || b.series_id, 'b' || b.book_id) AS grp,
+             GREATEST(
+               similarity(b.title, ${query}),
+               COALESCE(MAX(similarity(c.name, ${query})), 0)
+             )::float AS sim,
+             b.list_order
+      FROM books b
+      LEFT JOIN book_categories bc ON bc.book_id = b.book_id
+      LEFT JOIN categories c ON c.category_id = bc.category_id
+      WHERE b.title % ${query}
+         OR c.name % ${query}
+         OR b.title ILIKE ${"%" + query + "%"}
+      GROUP BY b.book_id
+    ),
+    grp_rank AS (
+      SELECT grp, MAX(sim) AS sim, MIN(list_order) AS lo FROM matched GROUP BY grp
+    ),
+    latest AS (
+      SELECT DISTINCT ON (grp) grp, book_id
+      FROM (SELECT COALESCE('s' || series_id, 'b' || book_id) AS grp, book_id, updated_at FROM books) x
+      WHERE grp IN (SELECT grp FROM grp_rank)
+      ORDER BY grp, updated_at DESC, book_id DESC
+    )
+    SELECT l.book_id, g.sim
+    FROM grp_rank g JOIN latest l USING (grp)
+    ORDER BY g.sim DESC, g.lo ASC NULLS LAST
     LIMIT 200
   `);
 
