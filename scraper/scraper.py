@@ -79,9 +79,14 @@ db_config = {
 class RidiScraper:
     PAGE_SIZE = 200  # Ridibooks API 최대
     DETAIL_SLEEP = 2.5  # 상세 페이지 요청 간격 (CF 레이트리밋 회피)
+    # 특가 세트 섹션 — 리스트 순서 = 처리 순서 = list_order 순서
+    SECTIONS = [
+        (748, "만화"),      # /comics/ebook "만화를 특가 세트로!"
+        (15286, "라노벨"),  # /comics/light-novel "라노벨을 특가 세트로!"
+    ]
 
     def __init__(self, db_config):
-        self.list_api_base = "https://api.ridibooks.com/v2/selections/?section_id=748"
+        self.list_api_base = "https://api.ridibooks.com/v2/selections/?section_id="
         self.detail_base_url = "https://ridibooks.com/books/"
         self.db_config = db_config
         # curl_cffi 세션 — Chrome TLS 지문 + 쿠키 유지 (__cf_bm 재사용)
@@ -448,12 +453,32 @@ class RidiScraper:
         print(f"  {display_title:<30} | {set_price:>7,d}원 | -{discount_pct:>2d}% | {status}")
 
     def fetch_all_items(self):
-        """offset 페이지네이션으로 전체 세일 세트북 리스트 수집.
+        """SECTIONS 순서대로(만화 → 라노벨) 리스트를 모아 book_id 기준 중복 제거.
+        두 섹션에 같은 책이 있으면 먼저 나온 섹션의 순서를 유지."""
+        items = []
+        seen = set()
+        for section_id, label in self.SECTIONS:
+            print(f"  [list] section {section_id} ({label})")
+            section_items = self.fetch_section_items(section_id)
+            added = 0
+            for item in section_items:
+                b_id = item['book']['book_id']
+                if b_id in seen:
+                    continue
+                seen.add(b_id)
+                items.append(item)
+                added += 1
+            dup = len(section_items) - added
+            print(f"  [list] section {section_id} ({label}): {added} added" + (f", {dup} duplicates skipped" if dup else ""))
+        return items
+
+    def fetch_section_items(self, section_id):
+        """offset 페이지네이션으로 한 섹션의 전체 세일 세트북 리스트 수집.
         List API도 Cloudflare 보호 안으로 들어와서 curl_cffi(Chrome 지문) 세션 사용."""
         items = []
         offset = 0
         while True:
-            url = f"{self.list_api_base}&limit={self.PAGE_SIZE}&offset={offset}"
+            url = f"{self.list_api_base}{section_id}&limit={self.PAGE_SIZE}&offset={offset}"
             r = self.session.get(url, timeout=20)
             if r.status_code != 200:
                 print(f"  [list] offset={offset} HTTP {r.status_code}, aborting")
