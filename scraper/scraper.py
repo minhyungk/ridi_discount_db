@@ -79,6 +79,7 @@ db_config = {
 class RidiScraper:
     PAGE_SIZE = 200  # Ridibooks API 최대
     DETAIL_SLEEP = 2.5  # 상세 페이지 요청 간격 (CF 레이트리밋 회피)
+    MIN_SAVE_RATIO = 0.5  # 리스트 대비 저장 비율이 이보다 낮으면 런 실패 처리
     # 특가 세트 섹션 — 리스트 순서 = 처리 순서 = list_order 순서
     SECTIONS = [
         (748, "만화"),      # /comics/ebook "만화를 특가 세트로!"
@@ -222,33 +223,43 @@ class RidiScraper:
         print(f"  [FAIL] {book_id} exhausted retries")
         return None
 
+    def _find_header_price(self, html):
+        """상세 페이지 __NEXT_DATA__ JSON에서 헤더 셀의 price 객체를 찾음.
+        cells 순서는 페이지마다 다를 수 있어 인덱스 대신 키로 탐색."""
+        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+        if not m:
+            return None
+        data = json.loads(m.group(1))
+        try:
+            cells = data['props']['pageProps']['sectionProps']['gridQuery']['riGrid']['grid']['cells']
+        except (KeyError, TypeError):
+            return None
+        for cell in cells:
+            header = cell.get('cell__BookDetailHomeHeader')
+            if header:
+                return header.get('price')
+        return None
+
     def extract_detail(self, book_id):
         html = self.fetch_detail_html(book_id)
         if html is None:
             return None
         try:
-            m_detail = re.search(r'var bookDetail = (\{.*?\});', html, re.DOTALL)
-            if not m_detail:
-                print(f"  [SKIP] {book_id} bookDetail JSON not found")
+            price = self._find_header_price(html)
+            if price is None:
+                print(f"  [SKIP] {book_id} header price not found in __NEXT_DATA__")
                 return None
 
-            b_detail = json.loads(m_detail.group(1))
-            p_info = b_detail.get('price_info', {}) or {}
+            purchase = (price.get('normal') or {}).get('purchase') or []
+            rows = {p.get('priceType'): p for p in purchase}
+            period = price.get('discountEventPeriod') or {}
 
-            def parse_date(d):
-                return d.get('date') if isinstance(d, dict) else d
-
-            set_price = int(p_info.get('current_price') or 0)
+            set_price = int((rows.get('판매가') or {}).get('price') or 0)
             if set_price <= 0:
                 print(f"  [SKIP] {book_id} set_price=0 (not for sale / unavailable)")
                 return None
 
-            m_rate = re.search(
-                r'"priceType":"전자책 세트 정가"[^}]*?"discountRate":(\d+)', html
-            )
-            discount_pct = int(m_rate.group(1)) if m_rate else int(
-                p_info.get('ebook_discount_percentage') or 0
-            )
+            discount_pct = int((rows.get('전자책 세트 정가') or {}).get('discountRate') or 0)
 
             full_price = (
                 round(set_price / (1 - discount_pct / 100))
@@ -257,8 +268,8 @@ class RidiScraper:
             )
 
             return {
-                "start_date": parse_date(p_info.get('discount_start_date')),
-                "end_date": parse_date(p_info.get('discount_end_date')),
+                "start_date": period.get('startDate'),
+                "end_date": period.get('endDate'),
                 "full_price": full_price,
                 "set_price": set_price,
                 "discount_pct": discount_pct,
@@ -509,15 +520,10 @@ class RidiScraper:
             self.backfill_series(cur)
             conn.commit()
 
-            # 매 런 시작 시 list_order 초기화 —
-            # 이번 세일 리스트에 없는 책(세일 종료된 옛 책)은 NULL로 남아서
-            # 검색 시 인기순 뒤쪽에 나오지만 히스토리 조회는 정상 작동
-            cur.execute("UPDATE books SET list_order = NULL")
-            conn.commit()
-
             items = self.fetch_all_items()
             print(f"\n[RidiDB] {len(items)} books found\n")
 
+            saved_ids = []
             for i, item in enumerate(items, 1):
                 book_data = item['book']
                 b_id = book_data['book_id']
@@ -529,6 +535,7 @@ class RidiScraper:
                     details = {**price_details, **metadata}
                     print(f"  [{i}/{len(items)}]", end=" ")
                     self._upsert(cur, b_id, title, details, i - 1)
+                    saved_ids.append(b_id)
 
                 if i % 50 == 0:
                     conn.commit()
@@ -536,11 +543,25 @@ class RidiScraper:
                 time.sleep(self.DETAIL_SLEEP)
 
             conn.commit()
-            print(f"\n[RidiDB] Done — {len(items)} books processed")
+
+            # 저장 건수가 비정상이면 기존 list_order를 유지하고 런을 실패 처리 —
+            # 파싱이 깨져도 사이트가 비지 않고, Actions에서 실패가 드러남
+            if not saved_ids or len(saved_ids) < len(items) * self.MIN_SAVE_RATIO:
+                raise RuntimeError(f"only {len(saved_ids)}/{len(items)} books saved")
+
+            # 이번 세일 리스트에 없는 책(세일 종료된 옛 책)은 NULL로 내림 —
+            # 검색 시 인기순 뒤쪽에 나오지만 히스토리 조회는 정상 작동
+            cur.execute(
+                "UPDATE books SET list_order = NULL WHERE list_order IS NOT NULL AND NOT (book_id = ANY(%s))",
+                (saved_ids,),
+            )
+            conn.commit()
+            print(f"\n[RidiDB] Done — {len(saved_ids)}/{len(items)} books saved")
         except Exception as e:
             conn.rollback()
             print(f"\n[ERR] Scraper failed: {e}")
             traceback.print_exc()
+            sys.exit(1)
         finally:
             cur.close()
             conn.close()
